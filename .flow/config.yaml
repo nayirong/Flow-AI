@@ -1,0 +1,63 @@
+version: "1.2"
+last_updated: "2026-04-07"
+changelog:
+  - "1.2 (2026-04-07): Added task log paths and session starter reference."
+  - "1.1 (2026-04-03): Merged triage into orchestrator. Added prompt-persona and knowledge agents at core and client level."
+  - "1.0 (2026-04-03): Initial setup."
+
+core:
+  orchestrator: .flow/agents/orchestrator.md
+  pm: .flow/agents/product-manager.md
+  engineer: .flow/agents/engineer.md
+  qa: .flow/agents/qa.md
+  prompt_persona: .flow/agents/prompt-persona.md
+  knowledge: .flow/agents/knowledge.md
+
+skills:
+  orchestrator: .flow/skills/orchestrator-skills.md
+  pm: .flow/skills/pm-skills.md
+  engineering: .flow/skills/engineering-skills.md
+  qa: .flow/skills/qa-skills.md
+  prompt_persona: .flow/skills/prompt-persona-skills.md
+  knowledge: .flow/skills/knowledge-skills.md
+
+protocols:
+  handoff: .flow/protocols/handoff-protocol.md
+  escalation: .flow/protocols/escalation-protocol.md
+  change_request: .flow/protocols/change-request-protocol.md
+  scope_review: .flow/protocols/scope-review-protocol.md
+
+templates:
+  orchestrator: .flow/templates/client-orchestrator.md
+  pm: .flow/templates/client-pm-agent.md
+  engineer: .flow/templates/client-engineering-agent.md
+  qa: .flow/templates/client-qa-agent.md
+  prompt_persona: .flow/templates/client-prompt-persona-agent.md
+  knowledge: .flow/templates/client-knowledge-agent.md
+
+clients:
+  hey-aircon:
+    path: clients/hey-aircon
+    agents: clients/hey-aircon/.agents
+    context: clients/hey-aircon/context.md
+    product: clients/hey-aircon/product
+    knowledge_base: clients/hey-aircon/product/knowledge
+    prompt_library: clients/hey-aircon/product/prompts
+    persona: clients/hey-aircon/product/persona.md
+
+tasks:
+  active: .flow/tasks/active.md
+  blocked: .flow/tasks/blocked.md
+  done: .flow/tasks/done.md
+
+session:
+  starter: .flow/SESSION_START.md
+
+rules:
+  all_changes_via_pm: true
+  require_prd_update_before_engineering: true
+  require_qa_before_complete: true
+  triage_at_orchestrator: true
+  task_id_required: true
+  prompt_changes_require_test_dialogue: true
+  knowledge_entries_require_source: true
