@@ -45,7 +45,7 @@ Postgres          ← stores execution history, credentials, chat memory
 | `MIN_BOOKING_NOTICE_DAYS` | `2` | Minimum days ahead a booking can be made. Configurable. |
 | `BOOKING_WINDOW_AM_START` | `09:00` | AM slot start (24hr) |
 | `BOOKING_WINDOW_AM_END` | `13:00` | AM slot end (24hr) |
-| `BOOKING_WINDOW_PM_START` | `13:00` | PM slot start (24hr) |
+| `BOOKING_WINDOW_PM_START` | `14:00` | PM slot start (24hr) |
 | `BOOKING_WINDOW_PM_END` | `18:00` | PM slot end (24hr) |
 | `BUSINESS_HOURS_START` | `09:00` | ⚠️ Placeholder — pending client confirmation |
 | `BUSINESS_HOURS_END` | `18:00` | ⚠️ Placeholder — pending client confirmation |

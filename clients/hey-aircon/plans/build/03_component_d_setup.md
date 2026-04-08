@@ -119,7 +119,7 @@ const window = windowRaw.toUpperCase();
 
 const windowTimes = {
   AM: { start: '09:00', end: '13:00' },
-  PM: { start: '13:00', end: '18:00' },
+  PM: { start: '14:00', end: '18:00' },
 };
 
 if (!windowTimes[window]) {
@@ -267,7 +267,7 @@ if (!input.date || !input.window) {
 
 const windowTimes = {
   AM: { start: '09:00:00', end: '13:00:00', label: '9am-1pm' },
-  PM: { start: '13:00:00', end: '18:00:00', label: '1pm-6pm' },
+  PM: { start: '14:00:00', end: '18:00:00', label: '2pm-6pm' },
 };
 
 const w = windowTimes[input.window.toUpperCase()];

@@ -4,7 +4,7 @@
 **Client:** HeyAircon
 **Phase:** 1 — WhatsApp Agent + Basic CRM
 **Target Timeline:** Weeks 1–4
-**Last Updated:** 4 April 2026
+**Last Updated:** 7 April 2026
 **Source:** Client scope discussion, 4 April 2026 (`04Apr_mvpscopediscussion.md`)
 
 ---
@@ -18,7 +18,7 @@ Deploy a WhatsApp AI agent that can answer basic service inquiries and handle ne
 ## ⚡ Stack Migration — Google Sheets → Supabase
 
 **Decision date:** April 2026
-**Status:** To-do — migrate before Component D tools are finalized
+**Status:** To-do — migrate before building Component E
 
 ### Why
 
@@ -47,21 +47,61 @@ Google Sheets was chosen as a zero-friction interim CRM for Phase 1. Before go-l
 
 ### Client Access Story
 
-Clients do not need n8n access. They access their data via **Supabase Studio**:
+**Supabase is always the single source of truth.** Clients access their data in one of two ways depending on their comfort level — but the agent always reads and writes Supabase only. There is no dual-write.
+
+#### Option A — Supabase Studio (default)
+
+Clients log in to Supabase Studio directly. The table editor works like a spreadsheet — click a cell, type, press Enter.
 
 | Data | Client Can... |
 |---|---|
 | Bookings | View all bookings, booking status, escalation flags |
 | Customers | View customer profiles, booking counts, history |
 | Interactions Log | View full conversation log per customer |
-| Config | Edit directly in table editor — add/update/remove services and pricing. Changes take effect on next customer message. |
-| Policies | Edit directly in table editor — update booking, escalation, rescheduling, cancellation policy text. Changes take effect on next customer message. |
+| Config | Edit directly — add/update/remove services and pricing. Changes take effect on next customer message. |
+| Policies | Edit directly — update policy text. Changes take effect on next customer message. |
 
-> Supabase Studio table editor works like a spreadsheet — clients click a cell, type the new value, press Enter. No SQL required.
+#### Option B — Read-Only Google Sheets Sync (fallback for Sheets-preferring clients)
+
+If a client is uncomfortable with Supabase Studio and prefers to see their data in Google Sheets, a scheduled n8n sync workflow overwrites a linked Sheet every 15–30 minutes.
+
+**How it works:**
+```
+Supabase (source of truth)
+    ↓  [n8n sync workflow — runs every 15 min]
+Google Sheet (read-only mirror — client views this)
+```
+
+**Rules:**
+- The Sheet is **read-only by convention** — the client views it, never edits it
+- The sync overwrites the entire sheet on each run — any manual edits are lost on the next cycle
+- Config and policies are **not synced to Sheets** — clients who cannot edit Supabase Studio themselves request changes via WhatsApp/email, and Flow AI updates Supabase as part of the retainer service (a 2-minute task per change)
+- The sync workflow is **built on request** — do not build it preemptively. Offer Supabase Studio first; build the sync only if the client explicitly asks for a Sheets view after seeing Studio
+
+**Sync workflow design (when built):**
+```
+[Schedule Trigger — every 15 min]
+    ↓
+[Postgres SELECT * FROM bookings ORDER BY created_at DESC LIMIT 500]
+    ↓
+[Google Sheets — clear sheet + append all rows]  ← bookings tab
+
+[Postgres SELECT * FROM customers]
+    ↓
+[Google Sheets — clear sheet + append all rows]  ← customers tab
+
+[Postgres SELECT * FROM interactions_log ORDER BY timestamp DESC LIMIT 1000]
+    ↓
+[Google Sheets — clear sheet + append all rows]  ← interactions tab
+```
+
+Three Postgres reads, three Sheets overwrites. No bidirectional sync, no conflict resolution, nothing can diverge.
+
+> **Why config and policies are excluded from sync:** The agent reads config and policies from Supabase at runtime. If the client edits a synced Sheet, the agent would never see the change — the Sheet is overwritten by the next sync anyway. Config and policies must always be edited in Supabase directly, either by the client or by Flow AI on their behalf.
 
 ### Migration To-Do List
 
-> Complete these before finalizing Component D tools. Component E (escalation) should be built directly against Supabase — do not build it against Sheets.
+> Component D is already built against Google Sheets. Complete the migration steps below before building Component E. Component E must be built directly against Supabase — do not build any part of it against Sheets.
 
 #### Step 1 — Supabase Setup
 - [ ] Create Supabase project: `heyaircon` (Flow AI account)
@@ -112,7 +152,21 @@ Clients do not need n8n access. They access their data via **Supabase Studio**:
 - [ ] Verify all 5 workflow changes working end-to-end via curl tests
 - [ ] Remove `HeyAircon Sheets` Google Sheets credential from n8n (after all nodes migrated)
 - [ ] Archive Google Sheet `HeyAircon CRM` — do not delete (backup reference)
+- [ ] Provision client Supabase login and walk client through Studio
 - [ ] Update client onboarding doc with Supabase Studio access instructions
+
+#### Step 4 — Optional: Google Sheets Sync Workflow (build only if client requests)
+
+> Do not build this preemptively. Show the client Supabase Studio first. If they explicitly ask for a Sheets view after seeing Studio, build this.
+
+- [ ] Create a new Google Sheet `HeyAircon CRM (View)` — three tabs: `Bookings`, `Customers`, `Interactions Log`
+- [ ] Build n8n workflow `HeyAircon Sheets Sync`:
+  - Schedule trigger: every 15 minutes
+  - Three Postgres SELECT → Google Sheets clear + append blocks (bookings, customers, interactions_log)
+  - No config or policies sync — those are Supabase-only
+- [ ] Share Sheet with client as view-only
+- [ ] Add note in Sheet header row: "This sheet is auto-refreshed every 15 minutes. Do not edit."
+- [ ] Test: confirm Sheet reflects a new booking made via WhatsApp within 15 minutes
 
 ### Supabase Table Schemas
 
@@ -191,7 +245,8 @@ CREATE TABLE policies (
 ### What This Resolves
 
 - **DT-001** (Interactions Log Google Sheets ceiling) — resolved. `interactions_log` is a Postgres table with no row limit.
-- **DT-002** (Policy text in spreadsheet cells) — partially resolved. Supabase Studio's table editor is a better editing experience than a Google Sheets cell for long prose. Full resolution (Google Docs migration) is deferred — Supabase Studio is sufficient for Phase 1 and 2.
+- **DT-002** (Policy text in spreadsheet cells) — resolved. Supabase Studio's table editor handles long prose cleanly. Google Docs migration no longer needed.
+- **Dual-write risk** — eliminated by design. Supabase is the only write target. Google Sheets (if used at all) is a one-way sync mirror — it can never diverge from Supabase in a way that affects the agent.
 
 ---
 
@@ -345,7 +400,7 @@ Both actions fire on every escalation:
 | `OPERATE_ON_PUBLIC_HOLIDAYS` | Whether bookings are accepted on public holidays | `false` |
 | `BOOKING_WINDOW_AM_START` | AM slot start time | `09:00` |
 | `BOOKING_WINDOW_AM_END` | AM slot end time | `13:00` |
-| `BOOKING_WINDOW_PM_START` | PM slot start time | `13:00` |
+| `BOOKING_WINDOW_PM_START` | PM slot start time | `14:00` |
 | `BOOKING_WINDOW_PM_END` | PM slot end time | `18:00` |
 | `DEV_WHATSAPP_NUMBER` | Developer/test WhatsApp number (Flow AI number during dev) | Flow AI business number |
 | `LABEL_ID_OUT_OF_SCOPE` | Meta label ID for Blue (out-of-scope) | Set during client onboarding |
@@ -755,7 +810,8 @@ Keyed by phone number. Window: last 20 messages. Persists across n8n restarts.
 | Agent escalates too aggressively (poor FAQ coverage) | MEDIUM | Poor customer experience | Iterative prompt tuning in Week 4 using placeholder content first, real content when available |
 | Calendar conflict race condition (two simultaneous free-slot bookings) | LOW | Double booking | Acceptable for Phase 1 volume; flag for Phase 2 hardening |
 | Number switch (dev → production) causes disruption | LOW | Broken webhook | Design workflows to be number-agnostic; switch is a single 360dialog + n8n env var update |
-| **Supabase migration delays Component D/E build** | MEDIUM | Sheets and Supabase nodes coexist mid-migration, causing confusion | Complete migration (Step 1 + Step 2) fully before finalizing Component D tools. Do not build Component E against Sheets at all — build it against Supabase from the start. |
+| **Supabase migration delays Component E build** | MEDIUM | Sheets and Supabase nodes coexist mid-migration, causing confusion | Complete migration Steps 1–3 fully before starting Component E. Component D has already been built; migrate it as part of Step 2 before E begins. |
+| **Client edits Sheets sync mirror and expects changes to stick** | LOW | Client confused when Sheets values are overwritten by next sync cycle | Only offer Sheets sync if client explicitly requests it. When setting it up, make clear the Sheet is read-only and add a header note on each tab. Config and policies are excluded from sync entirely — changes must go through Supabase or Flow AI retainer service. |
 
 ---
 
@@ -770,7 +826,7 @@ Keyed by phone number. Window: last 20 messages. Persists across n8n restarts.
 - [x] ✅ WhatsApp channel confirmed — Meta Cloud API direct (no BSP fee)
 - [x] ✅ Components A, B, C built and tested against Google Sheets
 
-**Supabase Migration (complete before finalizing D and E):**
+**Supabase Migration (complete before starting Component E — Component D already built, migrate it as part of this step):**
 - [ ] 🔴 Supabase project `heyaircon` created
 - [ ] 🔴 All 5 tables created with correct schema
 - [ ] 🔴 `config` table seeded with services and pricing data

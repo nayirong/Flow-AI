@@ -49,7 +49,7 @@ Add the following to the **n8n service Variables** tab in Railway:
 | `MIN_BOOKING_NOTICE_DAYS` | `2` |
 | `BOOKING_WINDOW_AM_START` | `09:00` |
 | `BOOKING_WINDOW_AM_END` | `13:00` |
-| `BOOKING_WINDOW_PM_START` | `13:00` |
+| `BOOKING_WINDOW_PM_START` | `14:00` |
 | `BOOKING_WINDOW_PM_END` | `18:00` |
 | `BUSINESS_HOURS_START` | `09:00` *(placeholder)* |
 | `BUSINESS_HOURS_END` | `18:00` *(placeholder)* |

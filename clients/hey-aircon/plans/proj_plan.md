@@ -182,6 +182,7 @@ Centralised record of all customers and their interactions.
 - Booking history per customer
 - Chat history linked to customer record
 - Per-unit service tracking (good to have)
+- **Dynamic interest scoring (Phase 2):** Numeric lead score (0–100) recalculated based on interaction events and time decay. Score drives a Hot / Warm / Cold label derived at read time — never stored statically. Key fields: `interest_score`, `last_interaction_at`, `lifecycle_stage` (lead / booked / completed / churned). Events add or subtract points (e.g. +30 first inquiry, +25 booking made, −40 service completed); a scheduled job applies passive decay (e.g. score × 0.95 weekly, force Cold after 60 days no interaction). Used in Phase 4 for campaign segmentation and re-engagement targeting.
 
 **Module 4 — Sales & Order Management**
 Financial and operational record-keeping for completed and in-progress jobs.
@@ -225,7 +226,7 @@ Delivery is structured in phases, each adding a meaningful layer of value. Each 
 | Phase | Timeline | Theme | Key Deliverables |
 |-------|----------|-------|------------------|
 | Phase 1 — MVP | Weeks 1–4 | Core booking automation | WhatsApp agent (FAQ + full booking flow + payment), calendar availability, booking confirmation + reminder messages, raw data capture to spreadsheet |
-| Phase 2 — CRM & Dashboard | Weeks 5–8 | Operational visibility | CRM interface (customer profiles, pipeline, booking history), bookings management dashboard, team & calendar settings UI. **Also:** migrate interaction logging from Sheets to Postgres (DT-001); migrate policy content from Sheets cells to Google Docs (DT-002). |
+| Phase 2 — CRM & Dashboard | Weeks 5–8 | Operational visibility | CRM interface (customer profiles, pipeline, booking history), bookings management dashboard, team & calendar settings UI. **Also:** migrate interaction logging from Sheets to Postgres (DT-001); migrate policy content from Sheets cells to Google Docs (DT-002); implement dynamic interest scoring model (event-based score + time decay, feeds Phase 4 campaign targeting). |
 | Phase 3 — Finance & Invoicing | Weeks 9–11 | Financial operations | Invoice generation and WhatsApp delivery, order management (status lifecycle), payment tracking, revenue reports and Excel export |
 | Phase 4 — Campaigns & Upsell | Weeks 12–14 | Growth automation | Re-engagement campaigns, upsell message sequences, Google review prompt post-service, configurable automation triggers |
 | Phase 5 — Website | Weeks 13–15 | Online presence | Client website with service pages, pricing, testimonials, WhatsApp CTA, and SEO setup _(can run in parallel with Phase 4)_ |
