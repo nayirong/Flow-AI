@@ -170,51 +170,47 @@ Two separate Webhook nodes on the same path but different HTTP methods. n8n rout
 
 ---
 
-## 5. Google Sheets (CRM)
+## 5. Supabase (CRM)
 
-### Spreadsheet
-- **Name:** `HeyAircon CRM`
-- **Credential in n8n:** `HeyAircon Sheets` (Google Sheets OAuth2 API)
-- **Google Cloud Project:** *(your project)* — Google Sheets API + Google Drive API both enabled
+### Project
+- **Supabase project:** `heyaircon` (Flow AI account)
+- **Credential in n8n:** `Supabase HeyAircon` (Postgres)
+- **Client access:** Supabase Studio — read + edit on `config` and `policies` tables; read-only on others
 
-### Sheets structure
-| Sheet name | Purpose | Key behaviour |
-|-----------|---------|--------------|
-| `Bookings` | One row per booking | `escalation_flag` column gates agent responses |
-| `Interactions Log` | Append-only message log | Every inbound + outbound message logged |
-| `Customers` | One row per customer | Upserted on each booking; `phone_number` is primary key |
-| `Config` | Key-value business config | Fetched at runtime and injected into agent system message |
-| `Policies` | Policy text by name | Fetched at runtime and injected into agent system message |
+### Tables
+| Table | Purpose | Key behaviour |
+|-------|---------|--------------|
+| `bookings` | One row per booking | Booking records only — no escalation state |
+| `interactions_log` | Append-only message log | Every inbound + outbound message logged |
+| `customers` | One row per customer | `escalation_flag` column gates agent responses; `phone_number` is unique key |
+| `config` | Key-value business config | Fetched at runtime and injected into agent system message |
+| `policies` | Policy text by name | Fetched at runtime and injected into agent system message |
 
-> **Context engineering pattern:** Business data (services, pricing, policies) lives in `Config` and `Policies` sheets — not hardcoded in the system prompt. The `Build Context` Code node assembles them into `system_message` before the AI Agent node runs. Client can update content in Sheets without touching n8n.
+> **Context engineering pattern:** Business data (services, pricing, policies) lives in `config` and `policies` tables — not hardcoded in the system prompt. The `Build Context` Code node assembles them into `system_message` before the AI Agent node runs. Client can update content in Supabase Studio without touching n8n.
 
-### Column headers (exact — case-sensitive)
-**Bookings:**
-```
-booking_id | created_at | phone_number | service_type | unit_count | aircon_brand | slot_date | slot_window | calendar_event_id | booking_status | escalation_flag | escalation_reason | notes
-```
+### Key queries used in workflows
 
-**Interactions Log:**
-```
-timestamp | phone_number | direction | message_text | message_type
+**Layer 1 gate — read escalation flag (`WA Inbound Handler`):**
+```sql
+SELECT escalation_flag, escalation_reason FROM customers WHERE phone_number = '{{phone_number}}' LIMIT 1
 ```
 
-**Customers:**
-```
-phone_number | customer_name | address | postal_code | first_seen | last_seen | total_bookings | notes
-```
-
-**Config:**
-```
-key | value
+**Fetch config (`WA Inbound Handler`):**
+```sql
+SELECT key, value FROM config ORDER BY sort_order
 ```
 
-**Policies:**
-```
-policy_name | policy_text
+**Fetch policies (`WA Inbound Handler`):**
+```sql
+SELECT policy_name, policy_text FROM policies ORDER BY sort_order
 ```
 
-> ⚠️ Column headers are matched by name in n8n Sheets nodes. If a header is renamed or has a typo, the node will silently write to the wrong column or fail.
+**Set escalation flag (`Tool - Escalate to Human`):**
+```sql
+UPDATE customers SET escalation_flag = TRUE, escalation_reason = '{{escalation_type}}' WHERE phone_number = '{{phone_number}}'
+```
+
+> Full Supabase table schemas (SQL CREATE TABLE statements) are in `mvp_scope.md` → Supabase Table Schemas section.
 
 ---
 
@@ -235,17 +231,17 @@ policy_name | policy_text
     ↓
 [Has Message?]  →  FALSE: [NoOp - stop]   (status updates, delivery receipts)
     ↓ TRUE
-[Extract Message Fields]                   (5 fields: phone_number, message_text, message_type, message_id, display_name)
+[Extract Message Fields]                   (6 fields: phone_number, message_text, message_type, message_id, display_name, wa_id)
     ↓
-[Read Escalation Flag]                     (Google Sheets Get Rows, Always Output Data = ON)
+[Read Escalation Flag]                     (Postgres SELECT from customers, Always Output Data = ON)
     ↓
 [Is Escalated?]
     ↓ TRUE                    ↓ FALSE
 [Log Inbound (Escalated)] [Log Inbound]    (WA Log Interaction sub-workflow)
 [Send Holding Reply]            ↓
-[Stop]                    [Fetch Config]   (Google Sheets: Config sheet, all rows)
+[Stop]                    [Fetch Config]   (Postgres SELECT from config)
                                 ↓
-                          [Fetch Policies] (Google Sheets: Policies sheet, all rows)
+                          [Fetch Policies] (Postgres SELECT from policies)
                                 ↓
                           [Build Context]  (Code node: assembles system_message from Config + Policies)
                                 ↓
@@ -383,11 +379,11 @@ At runtime, before the AI Agent runs, the flow:
 |----------|-----------|------|
 | Meta Cloud API direct (no BSP) | Eliminates ~$10/month BSP fee; Meta API is free during dev with test number | Apr 2026 |
 | n8n workers template on Railway | Splits webhook receipt (instant 200 OK) from execution (async worker) — required for WhatsApp which expects fast response | Apr 2026 |
-| Google Sheets as CRM | Zero setup for client; human-readable; sufficient for Phase 1 volume | Apr 2026 |
+| Supabase as CRM (migrated from Google Sheets) | Flow AI-owned data; Postgres scalability; foundation for SaaS dashboard; Supabase Studio gives client clean table view. Sheets archived as backup. | Apr 2026 |
 | `$env` passed from parent to sub-workflow | n8n sub-workflows cannot access `$env` directly; passing via fields is the only reliable pattern | Apr 2026 |
 | `Always Output Data` on Sheets lookup | Prevents execution stopping when no matching row found (new customer with no booking history) | Apr 2026 |
 | Two separate Webhook nodes (GET + POST) | Avoids `Unused Respond to Webhook node` error; Meta verification requires GET, inbound messages use POST | Apr 2026 |
-| Escalation flag in Sheets (not memory) | Must be deterministic and persistent — LLM memory cannot be trusted to gate agent responses | Apr 2026 |
+| Escalation flag on `customers` (not `bookings`, not memory) | Escalation is a customer state — silences the agent for a customer regardless of booking history. LLM memory cannot be trusted to gate responses. | Apr 2026 |
 | Single calendar, 2 fixed windows (AM/PM) | Client Phase 1 scope — no multi-team, no flexible slots | Apr 2026 |
 | Binary escalation gate (flag = true → agent silent) | Safe MVP default — deterministic, zero risk of agent responding to escalated topic | Apr 2026 |
 | Context engineering — business data in Sheets, not system prompt | Services, pricing, and policies managed in `Config` and `Policies` sheets. Client updates content without touching n8n. `Build Context` Code node assembles `system_message` at runtime before AI Agent runs. | Apr 2026 |
@@ -402,7 +398,7 @@ At runtime, before the AI Agent runs, the flow:
 
 | Issue | Workaround | Permanent fix |
 |-------|-----------|---------------|
-| `$env` blocked in sub-workflows | Pass env vars as explicit fields from parent workflow | Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on both Railway services |
+| `$env` and `process.env` both blocked in sub-workflow Code nodes | Pass env vars as explicit fields from parent workflow via trigger node input fields | This is by design in n8n's sandboxed task runner — pattern used throughout this project |
 | `$env` not resolving in parent workflow nodes | Hardcode `META_PHONE_NUMBER_ID` and `META_WHATSAPP_TOKEN` directly in Send Agent Reply node | Confirm `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` is set on n8n-worker service and redeploy |
 | Sheets Get Rows stops execution when no row found | Enable `Always Output Data` option on node | Already applied |
 | Meta 24hr token expiry during dev | Manually refresh token from Meta Developer Portal daily | Generate permanent System User token before UAT |
@@ -419,7 +415,7 @@ At runtime, before the AI Agent runs, the flow:
 
 | ID | Issue | Current behaviour | Recommended fix | Priority |
 |----|-------|------------------|-----------------|----------|
-| DR-001 | Escalation gate is binary — escalated customers receive no response to any message, including unrelated FAQ questions | Agent completely silent when `escalation_flag = TRUE` | Phase 1 quick fix: send fixed holding reply instead of silence. Phase 1.5: allow FAQ responses while blocking booking-related messages. See `mvp_scope.md` → Design Decisions to Revisit | High — discuss with client before UAT |
+| DR-001 | Escalation gate is binary — escalated customers receive no response to any message, including unrelated FAQ questions | **Resolved:** `Send Holding Reply` node added on TRUE branch — sends fixed message: "Our team is currently looking into your request. A member of our team will be in touch with you shortly." Phase 1.5: allow FAQ responses while blocking booking-related messages. | Resolved for Phase 1 |
 
 ---
 
@@ -436,8 +432,7 @@ At runtime, before the AI Agent runs, the flow:
 | `read_booking_from_sheets` tool | ⏳ Week 3 | Agent internal context only |
 | `check_calendar_availability` tool | ⏳ Week 3 | Single calendar, AM/PM windows |
 | `create_calendar_event` tool | ⏳ Week 3 | Add only, no update/delete |
-| `escalate_to_human` tool | ⏳ Week 4 | Sets escalation_flag, notifies human |
-| `send_human_agent_notification` tool | ⏳ Week 4 | WhatsApp to HUMAN_AGENT_WHATSAPP_NUMBER |
+| `escalate_to_human` tool | ⏳ Week 4 | Sets escalation_flag in Supabase, sends WhatsApp notification to human agent, applies Meta chat label via label API |
 | Meta webhook verification (GET) | ⏳ Pending Meta dev account | Webhook node built; waiting for Meta credentials |
 | Full round-trip test (real WhatsApp) | ⏳ Pending Meta dev account | curl test passes up to HTTP request |
 
@@ -458,6 +453,6 @@ At runtime, before the AI Agent runs, the flow:
 - [ ] Confirm `MIN_BOOKING_NOTICE_DAYS` with client
 - [ ] Fix `$env` resolution on n8n-worker (replace hardcoded token/phone ID with `$env` references)
 - [ ] Share client's Google account with n8n for Calendar access
-- [ ] Create 4 escalation labels in Meta Business Manager; store IDs as `LABEL_ID_*` env vars
+- [ ] Confirm `LABEL_ID_*` env vars are set to production label IDs (not dev placeholders) on both Railway services
 - [ ] Full scripted E2E test with client as test customer
 - [ ] Client sign-off on demo walkthrough

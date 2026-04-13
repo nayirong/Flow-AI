@@ -1,8 +1,8 @@
 # Component E — Build Guide
 ## Escalation Flow
 
-**Goal:** Agent correctly triggers escalation for slot conflicts, reschedule/cancellation requests, and out-of-scope queries. On every escalation: sets `escalation_flag = TRUE` in Sheets, sends a WhatsApp notification to the human agent, and applies a color-coded chat label via Meta Cloud API.
-**Acceptance:** All three escalation triggers fire correctly. Human notification sent to configured number. Agent silenced after escalation.
+**Goal:** Agent correctly triggers escalation for slot conflicts, reschedule/cancellation requests, and out-of-scope queries. On every escalation: sets `escalation_flag = TRUE` in Supabase, sends a WhatsApp notification to the human agent, and applies a color-coded chat label via Meta Cloud API.
+**Acceptance:** All three escalation triggers fire correctly. Human notification sent to configured number. Chat label applied. Agent silenced after escalation.
 
 ---
 
@@ -30,7 +30,7 @@ Labels are created once manually. At runtime, n8n maps escalation type to label 
 | `Customer Distress` | 🔴 Red | `customer_distress` escalations |
 
 4. After creating each label, note its **Label ID** (visible in the URL or via the API)
-5. Add each Label ID as an n8n environment variable on the Railway primary service:
+5. Add each Label ID as an n8n environment variable on **both** Railway services (n8n primary and n8n-worker):
 
 | Variable | Value |
 |----------|-------|
@@ -41,15 +41,15 @@ Labels are created once manually. At runtime, n8n maps escalation type to label 
 
 > **Getting Label IDs via API** if not visible in the UI:
 > ```
-> GET https://graph.facebook.com/v18.0/{phone-number-id}/labels
-> Authorization: Bearer {WHATSAPP_TOKEN}
+> GET https://graph.facebook.com/v19.0/{phone-number-id}/labels
+> Authorization: Bearer {META_WHATSAPP_TOKEN}
 > ```
 
 ---
 
 ## Step 2 — Add Environment Variable for Human Agent Number
 
-In Railway → primary service → **Variables**:
+In Railway → **both** n8n primary and n8n-worker services → **Variables**:
 
 | Variable | Value |
 |----------|-------|
@@ -63,7 +63,9 @@ During dev, set this to the Flow AI number. Switch to the client's number before
 
 Create a new workflow named **`Tool - Escalate to Human`**.
 
-### Node 1 — Execute Sub-Workflow Trigger
+### Node 1 — When Executed by Another Workflow (Execute Sub-Workflow Trigger)
+
+> n8n names this node **"When Executed by Another Workflow"** by default. Use this exact name when referencing it in downstream Code nodes: `$('When Executed by Another Workflow').first().json`
 
 Define these input fields:
 
@@ -73,27 +75,39 @@ Define these input fields:
 | `reason` | String | Short explanation of why escalation was triggered |
 | `customer_name` | String | Customer's name |
 | `phone_number` | String | Customer's WhatsApp number |
+| `wa_id` | String | WhatsApp internal contact ID (from webhook payload `contacts[0].wa_id`) — required for label API |
+| `human_agent_number` | String | Passed from parent — `HUMAN_AGENT_WHATSAPP_NUMBER` env var |
+| `phone_number_id` | String | Passed from parent — `META_PHONE_NUMBER_ID` env var |
+| `whatsapp_token` | String | Passed from parent — `META_WHATSAPP_TOKEN` env var |
+| `label_id_out_of_scope` | String | Passed from parent — `LABEL_ID_OUT_OF_SCOPE` env var |
+| `label_id_conflict` | String | Passed from parent — `LABEL_ID_CONFLICT` env var |
+| `label_id_change_request` | String | Passed from parent — `LABEL_ID_CHANGE_REQUEST` env var |
+| `label_id_customer_distress` | String | Passed from parent — `LABEL_ID_CUSTOMER_DISTRESS` env var |
 
-### Node 2 — Set Escalation Flag in Sheets (Google Sheets)
+> `$env` and `process.env` are both blocked inside sub-workflow Code nodes. All env vars must be passed as explicit fields from the parent workflow (`WA Inbound Handler`) — same pattern as `WA Send Message`.
 
-- Operation: `Update`
-- Sheet: `Customers`
-- **Column to Match On:** `phone_number`
-- Fields to update:
+### Node 2 — Update Escalation Flag in Supabase (Postgres)
 
-| Field | Value |
-|-------|-------|
-| `escalation_flag` | `TRUE` |
-| `escalation_reason` | `{{$json.escalation_type}}` |
+- Credential: `Supabase HeyAircon`
+- Operation: `Execute Query`
+- Query:
 
-> This is what silences the agent for future messages — the Layer 1 gate in `WA Inbound Handler` reads this flag.
+```sql
+UPDATE customers
+SET escalation_flag = TRUE, escalation_reason = '{{ $json.escalation_type }}'
+WHERE phone_number = '{{ $json.phone_number }}'
+```
+
+> Escalation is a **customer state**, not a booking state — it silences the agent for this customer regardless of whether a booking exists. This means E1 (out-of-scope, no booking) correctly sets the flag as long as the customer has sent at least one message (i.e. a `customers` row exists from a prior lookup).
+
+> **Edge case — brand new customer with no prior interaction:** If this is the customer's very first message and no booking or customer record exists yet, the UPDATE affects 0 rows. The WhatsApp notification still fires. For Phase 1 this is acceptable — in practice, an out-of-scope query from a first-time customer is rare.
 
 ### Node 3 — Build Notification (Code node — JavaScript)
 
 Assembles the WhatsApp message to send to the human agent:
 
 ```javascript
-const input = $input.first().json;
+const input = $('When Executed by Another Workflow').first().json;
 
 const typeLabels = {
   out_of_scope: 'Out of Scope Query',
@@ -105,15 +119,13 @@ const typeLabels = {
 const label = typeLabels[input.escalation_type] || input.escalation_type;
 
 const labelIds = {
-  out_of_scope: process.env.LABEL_ID_OUT_OF_SCOPE,
-  conflict: process.env.LABEL_ID_CONFLICT,
-  change_request: process.env.LABEL_ID_CHANGE_REQUEST,
-  customer_distress: process.env.LABEL_ID_CUSTOMER_DISTRESS,
+  out_of_scope: input.label_id_out_of_scope,
+  conflict: input.label_id_conflict,
+  change_request: input.label_id_change_request,
+  customer_distress: input.label_id_customer_distress,
 };
 
 const labelId = labelIds[input.escalation_type] || null;
-
-const humanNumber = process.env.HUMAN_AGENT_WHATSAPP_NUMBER;
 
 const message = [
   `*HeyAircon Escalation Alert*`,
@@ -130,7 +142,7 @@ return [{
   json: {
     ...input,
     label_id: labelId,
-    human_number: humanNumber,
+    human_number: input.human_agent_number,
     notification_message: message,
   }
 }];
@@ -140,57 +152,43 @@ return [{
 
 - Workflow: `WA Send Message`
 - Inputs:
-  - `to`: `{{$json.human_number}}`
-  - `message`: `{{$json.notification_message}}`
 
-This reuses the existing `WA Send Message` sub-workflow — no new HTTP Request node needed.
+| Field | Value |
+|-------|-------|
+| `to` | `{{$json.human_number}}` |
+| `message` | `{{$json.notification_message}}` |
+| `phone_number_id` | `{{$json.phone_number_id}}` |
+| `whatsapp_token` | `{{$json.whatsapp_token}}` |
 
-### Node 5 — Apply Chat Label (HTTP Request node)
+> `phone_number_id` and `whatsapp_token` are read from `process.env` in Node 3 and passed through here. `$env` expressions are blocked in sub-workflows, but `process.env` in Code nodes works — this is the same pattern used throughout the project.
+
+### Node 5a — Has Label? (IF node)
+
+Guard against escalation types with no mapped label ID (e.g. if an env var is missing).
+
+- Condition: `{{$('Build Notification').first().json.label_id}}` **is not empty**
+- TRUE → Node 5b (apply label)
+- FALSE → Node 6 (skip label, continue to return result)
+
+### Node 5b — Apply Chat Label (HTTP Request node)
 
 Applies the color-coded label to the customer's WhatsApp chat via Meta Cloud API.
 
 - Method: `POST`
-- URL: `https://graph.facebook.com/v18.0/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages`
+- URL: `https://graph.facebook.com/v19.0/{{$('Build Notification').first().json.phone_number_id}}/contacts/{{$('Build Notification').first().json.wa_id}}/labels`
 - Authentication: Generic Credential Type → Header Auth
   - Name: `Authorization`
-  - Value: `Bearer {{$env.WHATSAPP_TOKEN}}`
+  - Value: `Bearer {{$('Build Notification').first().json.whatsapp_token}}`
 - Body Content Type: `JSON`
 - Body (JSON):
 
 ```json
 {
-  "messaging_product": "whatsapp",
-  "to": "{{$('Build Notification').first().json.phone_number}}",
-  "type": "reaction",
-  "reaction": {
-    "message_id": "placeholder",
-    "emoji": ""
-  }
+  "label_id": "{{$('Build Notification').first().json.label_id}}"
 }
 ```
 
-> **Note:** WhatsApp Cloud API uses a **label** endpoint, not the messages endpoint. The correct call is:
-> ```
-> POST https://graph.facebook.com/v18.0/{phone-number-id}/contacts/{wa_id}/labels
-> Body: { "label_id": "{label_id}" }
-> ```
-> However this endpoint requires the WhatsApp contact ID (`wa_id`), not just the phone number. For Phase 1, **skip the label API call** and rely on the WhatsApp notification to the human agent alone. Add the label API in Phase 1.5 once you have confirmed the correct endpoint and wa_id mapping. See Note below.
-
-**Phase 1 Node 5 — Skip label, use a Code node as placeholder:**
-
-```javascript
-// Label API deferred to Phase 1.5 — wa_id mapping required
-// For now, log the intended label for manual reference
-const input = $('Build Notification').first().json;
-return [{
-  json: {
-    success: true,
-    escalation_type: input.escalation_type,
-    label_id: input.label_id,
-    note: 'Label API deferred — apply label manually in Meta Business Manager for now'
-  }
-}];
-```
+Connect both Node 5b TRUE output and Node 5a FALSE output to Node 6.
 
 ### Node 6 — Return Result (Code node — JavaScript)
 
@@ -222,14 +220,22 @@ In `WA Inbound Handler` → AI Agent node → **Tools** connector → add **Call
 | `reason` | `{{ $fromAI('reason', 'Brief explanation of why escalation was triggered') }}` |
 | `customer_name` | `{{ $fromAI('customer_name', 'Customer full name') }}` |
 | `phone_number` | `{{ $('Extract Message Fields').first().json.phone_number }}` |
+| `wa_id` | `{{ $('Extract Message Fields').first().json.wa_id }}` |
+| `human_agent_number` | `{{ $env.HUMAN_AGENT_WHATSAPP_NUMBER }}` |
+| `phone_number_id` | `{{ $env.META_PHONE_NUMBER_ID }}` |
+| `whatsapp_token` | `{{ $env.META_WHATSAPP_TOKEN }}` |
+| `label_id_out_of_scope` | `{{ $env.LABEL_ID_OUT_OF_SCOPE }}` |
+| `label_id_conflict` | `{{ $env.LABEL_ID_CONFLICT }}` |
+| `label_id_change_request` | `{{ $env.LABEL_ID_CHANGE_REQUEST }}` |
+| `label_id_customer_distress` | `{{ $env.LABEL_ID_CUSTOMER_DISTRESS }}` |
 
-`phone_number` is passed as a fixed expression — not inferred by the LLM.
+`phone_number`, `wa_id`, and all env vars are passed as fixed expressions — not inferred by the LLM. `$env` works here because this input is set in the parent workflow (`WA Inbound Handler`), not inside the sub-workflow.
 
 ---
 
-## Step 5 — Update Escalation Policy in Sheets
+## Step 5 — Update Escalation Policy in Supabase
 
-In `HeyAircon CRM` → `Policies` sheet → update the `escalation_policy` row:
+In Supabase Studio → `policies` table → update the `escalation_policy` row (`policy_text` column):
 
 ```
 Escalate to a human team member in these three situations only:
@@ -245,25 +251,49 @@ Always tell the customer: "A member of our team will reach out to you shortly." 
 
 ---
 
-## Step 6 — Test Escalation Scenarios
+## Step 6 — Add Holding Reply to `WA Inbound Handler`
+
+In `WA Inbound Handler`, on the `Is Escalated? → TRUE` branch, after `Log Inbound (Escalated)`, add an **Execute Sub-Workflow** node:
+
+- **Workflow:** `WA Send Message`
+- **Inputs:**
+
+| Field | Value |
+|-------|-------|
+| `to` | `{{$('Extract Message Fields').first().json.phone_number}}` |
+| `message` | `Our team is currently looking into your request. A member of our team will be in touch with you shortly.` |
+| `phone_number_id` | `{{$env.META_PHONE_NUMBER_ID}}` |
+| `whatsapp_token` | `{{$env.META_WHATSAPP_TOKEN}}` |
+
+Terminate after this node — no further nodes on the TRUE branch.
+
+---
+
+## Step 7 — Test Escalation Scenarios
 
 Clear Postgres memory before each test:
 ```sql
 DELETE FROM n8n_chat_histories;
 ```
 
+> **Note on `wa_id` in curl tests:** Real Meta webhooks populate `contacts[0].wa_id` automatically. In curl tests, add it manually as a mock value — it must be present for Node 5b to fire. Use the same value as `from` during dev (real `wa_id` differs in production but this is sufficient for flow testing).
+
 **Test E1 — Out of scope query**
 
 ```bash
 curl -X POST https://primary-production-c09dd.up.railway.app/webhook/whatsapp-inbound \
   -H "Content-Type: application/json" \
-  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"Can you help me fix my washing machine?"},"type":"text","id":"e_test_001"}],"contacts":[{"profile":{"name":"Test Customer"}}]}}]}]}'
+  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"Can you help me fix my washing machine?"},"type":"text","id":"e_test_001"}],"contacts":[{"profile":{"name":"Test Customer"},"wa_id":"6582829071"}]}}]}]}'
 ```
 
 Expected:
 - Agent attempts to answer, cannot, calls `escalate_to_human` with `out_of_scope`
-- `escalation_flag = TRUE` written to Customers sheet
+- `escalation_flag = TRUE` in Supabase `customers` table — verify:
+  ```sql
+  SELECT phone_number, escalation_flag, escalation_reason FROM customers WHERE phone_number = '6582829071';
+  ```
 - WhatsApp notification sent to `HUMAN_AGENT_WHATSAPP_NUMBER`
+- Chat label API attempted (Node 5b fires — expect Meta error response since test number doesn't support labels)
 - Agent tells customer a team member will reach out
 
 **Test E2 — Slot conflict**
@@ -273,13 +303,17 @@ First create a booking for a slot, then try to book the same slot again (differe
 ```bash
 curl -X POST https://primary-production-c09dd.up.railway.app/webhook/whatsapp-inbound \
   -H "Content-Type: application/json" \
-  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"I want to book a chemical wash on 15 April AM slot"},"type":"text","id":"e_test_002"}],"contacts":[{"profile":{"name":"Test Customer"}}]}}]}]}'
+  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"I want to book a chemical wash on 15 April AM slot"},"type":"text","id":"e_test_002"}],"contacts":[{"profile":{"name":"Test Customer"},"wa_id":"6582829071"}]}}]}]}'
 ```
 
 Expected:
 - `check_calendar_availability` returns `available: false`
 - Agent calls `escalate_to_human` with `conflict`
-- Notification sent to human agent
+- WhatsApp notification sent, chat label API attempted
+- `escalation_flag = TRUE` in Supabase `customers` table — verify:
+  ```sql
+  SELECT phone_number, escalation_flag, escalation_reason FROM customers WHERE phone_number = '6582829071';
+  ```
 - Customer told team will reach out to arrange alternative
 
 **Test E3 — Reschedule request**
@@ -287,60 +321,55 @@ Expected:
 ```bash
 curl -X POST https://primary-production-c09dd.up.railway.app/webhook/whatsapp-inbound \
   -H "Content-Type: application/json" \
-  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"I need to reschedule my booking"},"type":"text","id":"e_test_003"}],"contacts":[{"profile":{"name":"Test Customer"}}]}}]}]}'
+  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"I need to reschedule my booking"},"type":"text","id":"e_test_003"}],"contacts":[{"profile":{"name":"Test Customer"},"wa_id":"6582829071"}]}}]}]}'
 ```
 
 Expected:
 - Agent shares rescheduling policy (48 hours notice)
 - Calls `escalate_to_human` with `change_request`
-- Notification sent
+- WhatsApp notification sent, chat label API attempted
+- `escalation_flag = TRUE` in Supabase `customers` table — verify:
+  ```sql
+  SELECT phone_number, escalation_flag, escalation_reason FROM customers WHERE phone_number = '6582829071';
+  ```
 - Customer told team will be in touch
 
 **Test E4 — Agent silenced after escalation**
 
-Immediately after Test E1/E2/E3, send another message from the same number:
+Run this immediately after any of E1/E2/E3 (all three now set `escalation_flag = TRUE` on the `customers` row).
+
+Send another message from the same number:
 
 ```bash
 curl -X POST https://primary-production-c09dd.up.railway.app/webhook/whatsapp-inbound \
   -H "Content-Type: application/json" \
-  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"What is your price for general servicing?"},"type":"text","id":"e_test_004"}],"contacts":[{"profile":{"name":"Test Customer"}}]}}]}]}'
+  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"6582829071","text":{"body":"What is your price for general servicing?"},"type":"text","id":"e_test_004"}],"contacts":[{"profile":{"name":"Test Customer"},"wa_id":"6582829071"}]}}]}]}'
 ```
 
 Expected:
-- Layer 1 reads `escalation_flag = TRUE`
-- Workflow stops — no agent response sent
-- Execution log shows stop at `Is Escalated?` node
+- Layer 1 reads `escalation_flag = TRUE` from Supabase `customers` table
+- Workflow stops after sending holding reply — no AI agent invoked
+- Customer receives: "Our team is currently looking into your request. A member of our team will be in touch with you shortly."
+- Execution log shows: `Is Escalated?` → TRUE → `Log Inbound (Escalated)` → `Send Holding Reply` → stop
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] `HUMAN_AGENT_WHATSAPP_NUMBER` env var set
-- [ ] Label IDs created in Meta (can be placeholder values for Phase 1)
+- [ ] `HUMAN_AGENT_WHATSAPP_NUMBER` env var set on both Railway services
+- [ ] `LABEL_ID_*` env vars set with real Meta label IDs on both Railway services
+- [ ] `wa_id` field added to `Extract Message Fields` node in `WA Inbound Handler`
 - [ ] `Tool - Escalate to Human` sub-workflow built and published
-- [ ] `escalate_to_human` tool registered on AI Agent
-- [ ] `escalation_policy` updated in Policies sheet
+- [ ] `escalate_to_human` tool registered on AI Agent (including `wa_id` fixed input)
+- [ ] `escalation_policy` updated in Supabase `policies` table
+- [ ] `Send Holding Reply` node added to `WA Inbound Handler` TRUE branch
 - [ ] Test E1 passed — out of scope escalation fires correctly
 - [ ] Test E2 passed — conflict escalation fires correctly
 - [ ] Test E3 passed — change request escalation fires correctly
 - [ ] Test E4 passed — agent silenced after escalation flag set
 - [ ] WhatsApp notification received on human agent number for each test
-- [ ] `escalation_flag = TRUE` visible in Customers sheet after each test
-
----
-
-## Deferred: Chat Label API (Phase 1.5)
-
-The Meta Cloud API label endpoint requires a `wa_id` (internal WhatsApp contact ID) which differs from the customer's phone number. Mapping phone number → wa_id requires either:
-- Storing `wa_id` from the initial webhook payload (it's present in `contacts[0].wa_id`)
-- Or making a contacts lookup API call before applying the label
-
-**Phase 1.5 fix:**
-1. In `Extract Message Fields` Set node — add `wa_id` field: `{{$json.entry[0].changes[0].value.contacts[0].wa_id}}`
-2. Pass `wa_id` through to the escalation tool
-3. Replace the Node 5 placeholder Code node with the actual HTTP Request:
-   - `POST https://graph.facebook.com/v18.0/{phone-number-id}/contacts/{wa_id}/labels`
-   - Body: `{ "label_id": "{label_id}" }`
+- [ ] Chat label applied via Meta API for each test (visible in n8n execution log)
+- [ ] `escalation_flag = TRUE` visible in Supabase `customers` table after each test
 
 ---
 

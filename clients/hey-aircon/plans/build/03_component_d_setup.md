@@ -467,7 +467,6 @@ Connect both Node 5 and Node 6 to this node.
 | `slot_window` | `{{$('Generate Booking ID').item.json.window}}` |
 | `calendar_event_id` | `{{$('Generate Booking ID').item.json.calendar_event_id}}` |
 | `booking_status` | `Confirmed` |
-| `escalation_flag` | `FALSE` |
 
 **Node 8 — Return Result (Code node — JavaScript)**
 

@@ -119,7 +119,7 @@ Three Postgres reads, three Sheets overwrites. No bidirectional sync, no conflic
 
 **`WA Inbound Handler` — update 3 nodes:**
 - [ ] `Read Escalation Flag`: replace Google Sheets Get Rows → Postgres node
-  - Query: `SELECT escalation_flag, escalation_reason FROM bookings WHERE phone_number = '{{phone_number}}' ORDER BY created_at DESC LIMIT 1`
+  - Query: `SELECT escalation_flag, escalation_reason FROM customers WHERE phone_number = '{{phone_number}}' LIMIT 1`
 - [ ] `Fetch Config`: replace Google Sheets Get Rows → Postgres node
   - Query: `SELECT key, value FROM config ORDER BY sort_order`
 - [ ] `Fetch Policies`: replace Google Sheets Get Rows → Postgres node
@@ -146,7 +146,7 @@ Three Postgres reads, three Sheets overwrites. No bidirectional sync, no conflic
 
 **`Tool - Escalate to Human` sub-workflow (Component E — build directly against Supabase):**
 - [ ] Build escalation flag update as Postgres UPDATE from the start — do not build against Sheets
-  - `UPDATE bookings SET escalation_flag=TRUE, escalation_reason=... WHERE phone_number=... AND booking_status != 'Cancelled' ORDER BY created_at DESC LIMIT 1`
+  - `UPDATE customers SET escalation_flag=TRUE, escalation_reason=... WHERE phone_number=...`
 
 #### Step 3 — Cleanup
 - [ ] Verify all 5 workflow changes working end-to-end via curl tests
@@ -184,8 +184,6 @@ CREATE TABLE bookings (
   slot_window     TEXT,                           -- AM or PM
   calendar_event_id TEXT,
   booking_status  TEXT DEFAULT 'Confirmed',
-  escalation_flag BOOLEAN DEFAULT FALSE,
-  escalation_reason TEXT,
   notes           TEXT
 );
 ```
@@ -201,6 +199,8 @@ CREATE TABLE customers (
   first_seen      TIMESTAMPTZ DEFAULT NOW(),
   last_seen       TIMESTAMPTZ DEFAULT NOW(),
   total_bookings  INTEGER DEFAULT 0,
+  escalation_flag BOOLEAN DEFAULT FALSE,          -- gates agent responses for this customer
+  escalation_reason TEXT,
   notes           TEXT
 );
 ```
