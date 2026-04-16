@@ -1,21 +1,111 @@
 # Platform-level Tool Use Test Cases
+# Covers: correct tool selection, ordering rules (calendar before write_booking),
+#   no-tool negative cases, required params validation
+# Owner: SDET Engineer | Applies to ALL clients
 
 - test_name: "tool_check_calendar_basic"
   client_id: "platform"
   category: "tool_use"
+  priority: "critical"
   input_message: "Are you available this Saturday morning?"
+  expected_intent: "booking_request"
   expected_tool: "check_calendar_availability"
   expected_tool_params:
     timezone: "Asia/Singapore"
-  priority: "critical"
+  expected_escalation: false
+  reference_test: false
   tags: ["tool", "calendar"]
   enabled: true
+  metadata:
+    rule: "Availability question → check_calendar_availability with correct timezone"
 
-- test_name: "tool_wrong_tool_selected"
+- test_name: "tool_no_tool_for_faq"
   client_id: "platform"
   category: "tool_use"
-  input_message: "What's your phone number?"
-  expected_tool: null  # Should not call any tool for this
   priority: "medium"
-  tags: ["tool", "negative-case"]
+  input_message: "What's your phone number?"
+  expected_intent: "faq"
+  expected_tool: null
+  expected_escalation: false
+  reference_test: false
+  tags: ["tool", "negative_case", "faq"]
   enabled: true
+  metadata:
+    rule: "FAQ/info question → no tool should be called"
+
+- test_name: "tool_booking_requires_calendar_check_first"
+  client_id: "platform"
+  category: "tool_use"
+  priority: "critical"
+  input_message: "Book me for general servicing on 30 April morning at 55 Clementi Ave 3 #10-10, 2 units"
+  expected_intent: "booking_request"
+  expected_tool: "check_calendar_availability"
+  expected_tool_params:
+    timezone: "Asia/Singapore"
+  expected_escalation: false
+  reference_test: true
+  tags: ["tool", "calendar", "booking", "ordering"]
+  enabled: true
+  metadata:
+    rule: "All booking attempts: call check_calendar_availability BEFORE write_booking — never skip"
+
+- test_name: "tool_no_booking_without_all_required_fields"
+  client_id: "platform"
+  category: "tool_use"
+  priority: "critical"
+  input_message: "Book me for next Monday"
+  expected_intent: "booking_request"
+  expected_tool: null
+  expected_escalation: false
+  reference_test: false
+  tags: ["tool", "booking", "validation", "negative_case"]
+  enabled: true
+  metadata:
+    rule: "Must NOT call write_booking without: service_type, booking_date, slot, address, unit_count"
+
+- test_name: "tool_escalate_has_required_params"
+  client_id: "platform"
+  category: "tool_use"
+  priority: "critical"
+  input_message: "I am very frustrated and want to speak to someone!"
+  expected_intent: "complaint"
+  expected_tool: "escalate_to_human"
+  expected_tool_params:
+    reason: "{{ reason }}"
+    phone_number: "{{ phone_number }}"
+  expected_escalation: true
+  reference_test: false
+  tags: ["tool", "escalation", "params"]
+  enabled: true
+  metadata:
+    rule: "escalate_to_human must always include phone_number and reason — both are required"
+
+- test_name: "tool_get_bookings_before_reschedule"
+  client_id: "platform"
+  category: "tool_use"
+  priority: "high"
+  input_message: "I need to reschedule my appointment"
+  expected_intent: "reschedule_request"
+  expected_tool: "get_customer_bookings"
+  expected_tool_params:
+    phone_number: "{{ phone_number }}"
+  expected_escalation: false
+  reference_test: false
+  tags: ["tool", "booking", "reschedule", "lookup"]
+  enabled: true
+  metadata:
+    rule: "Reschedule request → get_customer_bookings first to find the booking before escalating"
+
+- test_name: "tool_no_calendar_for_simple_inquiry"
+  client_id: "platform"
+  category: "tool_use"
+  priority: "medium"
+  input_message: "How much does a general service cost?"
+  expected_intent: "pricing_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  reference_test: false
+  tags: ["tool", "pricing", "negative_case"]
+  enabled: true
+  metadata:
+    rule: "Pricing inquiry → no tool call; answer from config context"

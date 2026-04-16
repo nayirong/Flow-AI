@@ -1,9 +1,13 @@
-"""Base reporter class (stub)."""
+"""Base reporter class."""
+
+from abc import ABC, abstractmethod
+from ..models import RunResult
 
 
-class BaseReporter:
+class BaseReporter(ABC):
     """Base class for all reporters."""
     
-    async def report(self, run_result):
+    @abstractmethod
+    async def report(self, run_result: RunResult):
         """Generate report from run result."""
-        raise NotImplementedError()
+        pass

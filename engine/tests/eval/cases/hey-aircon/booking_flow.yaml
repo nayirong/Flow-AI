@@ -1,17 +1,205 @@
-# HeyAircon-specific Booking Flow Test Cases
-# PM will populate with real scenarios
+# HeyAircon Booking Flow Test Cases
+# Owner: SDET Engineer | Reviewed by: Owner (pending)
+# Purpose: Validates multi-step booking flow, calendar availability checks, policy enforcement
 
-- test_name: "booking_happy_path_am_slot"
+- test_name: "booking_partial_date_service_slot_missing_address"
+  client_id: "hey-aircon"
+  category: "multi_turn"
+  priority: "high"
+  conversation_history:
+    - role: "user"
+      content: "Book me for general servicing 30 April morning"
+    - role: "assistant"
+      content: "I'd be happy to help book your General Servicing for April 30th in the morning slot! To complete your booking, I'll need a couple more details."
+  input_message: "How much more info do you need?"
+  expected_intent: "booking_request"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["address", "units"]
+  reference_test: false
+  tags: ["multi_turn", "booking", "partial_info"]
+  enabled: true
+  metadata:
+    note: "Agent has date, service, slot — must ask for address and unit_count before booking"
+
+- test_name: "booking_partial_date_only"
+  client_id: "hey-aircon"
+  category: "multi_turn"
+  priority: "medium"
+  input_message: "Book me on 30 April"
+  expected_intent: "booking_request"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["service", "time"]
+  reference_test: false
+  tags: ["multi_turn", "booking", "partial_info"]
+  enabled: true
+  metadata:
+    note: "Agent has date only — must ask for service, slot, address, unit_count"
+
+- test_name: "booking_partial_service_only"
+  client_id: "hey-aircon"
+  category: "multi_turn"
+  priority: "medium"
+  input_message: "I want to book a chemical wash"
+  expected_intent: "booking_request"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["date", "time"]
+  reference_test: false
+  tags: ["multi_turn", "booking", "partial_info"]
+  enabled: true
+  metadata:
+    note: "Agent has service only — must ask for date, slot, address, unit_count"
+
+- test_name: "booking_complete_info_check_calendar_first"
   client_id: "hey-aircon"
   category: "tool_use"
-  input_message: "Book me for general servicing tomorrow morning"
+  priority: "critical"
+  input_message: "I want to book General Servicing for 30 April 2026 morning at 12 Tampines Ave 5 #05-22, I have 2 units"
+  expected_intent: "booking_request"
+  expected_tool: "check_calendar_availability"
+  expected_tool_params:
+    date: "{{ date }}"
+    timezone: "Asia/Singapore"
+  expected_escalation: false
+  reference_test: false
+  tags: ["tool_use", "booking", "calendar_check"]
+  enabled: true
+  metadata:
+    note: "Agent MUST call check_calendar_availability before write_booking — never skip"
+
+- test_name: "booking_complete_info_slot_available_write_booking"
+  client_id: "hey-aircon"
+  category: "tool_use"
+  priority: "critical"
+  conversation_history:
+    - role: "user"
+      content: "I want to book General Servicing for 30 April 2026 morning at 12 Tampines Ave 5 #05-22, I have 2 units"
+    - role: "assistant"
+      content: "I checked and the morning slot on April 30th is available. Shall I confirm your booking?"
+  input_message: "Yes please go ahead"
+  expected_intent: "booking_request"
   expected_tool: "write_booking"
   expected_tool_params:
     service_type: "General Servicing"
-    # slot_window: "AM"  # TODO: PM to complete
-  priority: "critical"
+    slot: "AM"
+    booking_date: "{{ date }}"
+  expected_escalation: false
+  expected_response_contains: ["confirmed", "HA-"]
   reference_test: true
-  tags: ["booking", "critical-path"]
+  tags: ["tool_use", "booking", "happy_path", "critical"]
   enabled: true
   metadata:
-    note: "PLACEHOLDER — PM to populate with complete test case"
+    note: "Happy path: all info provided, AM slot available, booking written. Booking ID HA- should appear."
+    integration_test: true
+
+- test_name: "booking_complete_info_slot_unavailable_escalate"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "high"
+  conversation_history:
+    - role: "user"
+      content: "I want to book Chemical Wash for 28 April 2026 afternoon at 45 Marine Parade #12-08, 3 units"
+    - role: "assistant"
+      content: "I checked the calendar and unfortunately the afternoon slot on April 28th is already fully booked. Would an alternative date or the morning slot work?"
+  input_message: "No other time works for me"
+  expected_intent: "booking_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "booking", "unavailable_slot"]
+  enabled: true
+  metadata:
+    note: "Slot unavailable and customer cannot accept alternatives — escalate to human"
+
+- test_name: "booking_next_day_policy_violation_escalate"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "critical"
+  input_message: "I need to book a repair for tomorrow morning urgently"
+  expected_intent: "booking_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["2 days", "advance"]
+  reference_test: true
+  tags: ["escalation", "booking", "policy_violation", "min_notice"]
+  enabled: true
+  metadata:
+    note: "Next-day booking violates MIN_BOOKING_NOTICE_DAYS=2 — agent explains policy then escalates"
+
+- test_name: "booking_negative_not_a_booking_request"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "What's the weather like today?"
+  expected_intent: "out_of_scope"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["help"]
+  reference_test: false
+  tags: ["intent", "negative_case", "out_of_scope"]
+  enabled: true
+  metadata:
+    note: "Not a booking request — agent must NOT call any booking tool"
+
+- test_name: "booking_unknown_service_type_clarify"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "I want to book a duct cleaning service for 25 April"
+  expected_intent: "booking_request"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["General Servicing", "Chemical Wash"]
+  expected_response_excludes: ["duct cleaning"]
+  reference_test: false
+  tags: ["intent", "booking", "service_clarification"]
+  enabled: true
+  metadata:
+    note: "Service not in catalog — agent lists available services, does not proceed with unknown service"
+
+- test_name: "booking_pm_slot_happy_path"
+  client_id: "hey-aircon"
+  category: "tool_use"
+  priority: "high"
+  conversation_history:
+    - role: "user"
+      content: "Book Gas Top Up for 3 May 2026 afternoon, 88 Bedok North St 4 #03-15, 1 unit"
+    - role: "assistant"
+      content: "The afternoon slot on May 3rd is available. Shall I confirm your Gas Top Up booking?"
+  input_message: "Yes please proceed"
+  expected_intent: "booking_request"
+  expected_tool: "write_booking"
+  expected_tool_params:
+    service_type: "Gas Top Up"
+    slot: "PM"
+    booking_date: "{{ date }}"
+  expected_escalation: false
+  expected_response_contains: ["confirmed", "HA-"]
+  reference_test: false
+  tags: ["tool_use", "booking", "pm_slot", "happy_path"]
+  enabled: true
+  metadata:
+    note: "PM slot booking happy path — verifies slot='PM' is set correctly"
+
+- test_name: "booking_unit_count_zero_ask_again"
+  client_id: "hey-aircon"
+  category: "multi_turn"
+  priority: "medium"
+  conversation_history:
+    - role: "user"
+      content: "Book Chemical Overhaul for 1 May morning at 10 Ang Mo Kio Ave 3 #08-12"
+    - role: "assistant"
+      content: "How many aircon units do you need serviced?"
+  input_message: "0 units"
+  expected_intent: "booking_request"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["unit"]
+  reference_test: false
+  tags: ["edge_case", "booking", "validation"]
+  enabled: true
+  metadata:
+    note: "Zero unit_count is invalid — agent asks for a valid count, does not proceed to booking"

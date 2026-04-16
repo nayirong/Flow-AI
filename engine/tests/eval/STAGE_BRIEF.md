@@ -208,11 +208,32 @@ Use Pydantic v2 for all data models. Models are specified in architecture doc Se
 
 Use `httpx.AsyncClient` for all HTTP calls (Telegram). No `requests` library.
 
-### 5.6 Testing
+### 5.6 LLM Provider Adapter
+
+`AgentExecutor` must support two LLM providers, selected via the `LLM_PROVIDER` environment variable:
+
+| `LLM_PROVIDER` | Client | Use case |
+|----------------|--------|----------|
+| `anthropic` (default) | `anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)` | CI, production |
+| `github_models` | `openai.AsyncOpenAI(api_key=GITHUB_TOKEN, base_url="https://models.inference.ai.azure.com/v1")` | Local dev — uses Copilot subscription |
+
+Implement a `LLMProviderAdapter` class in `engine/tests/eval/llm_provider.py` that:
+- Reads `LLM_PROVIDER` env var at init time
+- Constructs the correct async client
+- Reads `LLM_MODEL_OVERRIDE` env var — if set, uses that model name; otherwise defaults to `claude-sonnet-4-6`
+- Exposes a single `async def complete(messages, tools) -> dict` method that normalises the response from both providers to the same shape expected by `AgentExecutor`
+
+The GitHub Models API is OpenAI-compatible (`openai` SDK works). The Anthropic API uses the `anthropic` SDK. The adapter hides this difference from `AgentExecutor`.
+
+**Add `openai` to `requirements-dev.txt`** (not `requirements.txt` — only needed for testing).
+
+### 5.7 Testing
 
 - Use `pytest` with `pytest-asyncio` for async tests
 - Use `pytest-httpx` for mocking HTTP calls in Telegram tests
 - All tests must be runnable with `pytest engine/tests/eval/ -v`
+- Unit tests must run with no environment variables set (all external calls mocked)
+- Mark integration tests with `@pytest.mark.integration`
 
 ---
 
@@ -374,9 +395,9 @@ Full eval suite with 40 test cases must complete in <5 minutes.
 
 ### Q3: Test Case YAML Authorship
 
-**Question:** Who writes platform-level YAML test cases?
+**Answer:** SDET writes platform-level YAML test cases for Phase 1.
 
-**Answer:** SDET for Phase 1. PM will contribute later.
+**Owner review process:** All YAML test case files are in `engine/tests/eval/cases/`. Every PR that adds or modifies them must request review from the project owner. The owner can also add test cases directly (see §9.8 of test plan) — via YAML PR or Supabase Studio insert.
 
 ---
 

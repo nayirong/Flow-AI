@@ -1,28 +1,133 @@
 # Platform-level Intent Classification Test Cases
+# Covers: all core intents that every Flow AI client agent must correctly classify
+# Owner: SDET Engineer | Applies to ALL clients
 
 - test_name: "intent_greeting"
   client_id: "platform"
   category: "intent"
+  priority: "low"
   input_message: "Hi there!"
   expected_intent: "greeting"
-  priority: "low"
-  tags: ["intent", "conversation"]
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["help"]
+  reference_test: false
+  tags: ["intent", "greeting"]
   enabled: true
+  metadata:
+    note: "Simple greeting — agent should introduce and offer to help"
 
 - test_name: "intent_booking_request_explicit"
   client_id: "platform"
   category: "intent"
+  priority: "high"
   input_message: "I want to book a service"
   expected_intent: "booking_request"
-  priority: "high"
+  expected_tool: null
+  expected_escalation: false
+  reference_test: false
   tags: ["intent", "booking"]
   enabled: true
+  metadata:
+    note: "Explicit booking intent — agent asks for details (no tool until info collected)"
 
 - test_name: "intent_pricing_inquiry"
   client_id: "platform"
   category: "intent"
+  priority: "medium"
   input_message: "How much does it cost?"
   expected_intent: "pricing_inquiry"
-  priority: "medium"
-  tags: ["intent", "faq"]
+  expected_tool: null
+  expected_escalation: false
+  reference_test: false
+  tags: ["intent", "faq", "pricing"]
   enabled: true
+  metadata:
+    note: "General pricing — agent asks which service before quoting"
+
+- test_name: "intent_service_inquiry"
+  client_id: "platform"
+  category: "intent"
+  priority: "medium"
+  input_message: "What services do you offer?"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  reference_test: false
+  tags: ["intent", "faq", "service_inquiry"]
+  enabled: true
+  metadata:
+    note: "Service inquiry — agent lists available services from config"
+
+- test_name: "intent_reschedule_request"
+  client_id: "platform"
+  category: "intent"
+  priority: "high"
+  input_message: "I need to change my appointment"
+  expected_intent: "reschedule_request"
+  expected_tool: "get_customer_bookings"
+  expected_escalation: false
+  reference_test: false
+  tags: ["intent", "reschedule"]
+  enabled: true
+  metadata:
+    note: "Reschedule intent — agent looks up bookings first"
+
+- test_name: "intent_cancellation_request"
+  client_id: "platform"
+  category: "intent"
+  priority: "high"
+  input_message: "Cancel my booking please"
+  expected_intent: "cancellation_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["intent", "cancellation"]
+  enabled: true
+  metadata:
+    note: "Cancellation intent — Phase 1: always escalate to human"
+
+- test_name: "intent_complaint"
+  client_id: "platform"
+  category: "intent"
+  priority: "critical"
+  input_message: "This is the second time your technician has been late. I'm not happy."
+  expected_intent: "complaint"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["intent", "complaint", "escalation"]
+  enabled: true
+  metadata:
+    note: "Complaint intent — agent empathizes briefly, escalates immediately"
+
+- test_name: "intent_out_of_scope"
+  client_id: "platform"
+  category: "intent"
+  priority: "high"
+  input_message: "What's the best aircon brand to buy?"
+  expected_intent: "out_of_scope"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_excludes: ["I recommend", "brand", "buy"]
+  reference_test: false
+  tags: ["intent", "out_of_scope"]
+  enabled: true
+  metadata:
+    note: "Out of scope — agent stays in servicing scope, escalates for purchasing advice"
+
+- test_name: "intent_booking_ambiguous_no_tool"
+  client_id: "platform"
+  category: "intent"
+  priority: "medium"
+  input_message: "Book me"
+  expected_intent: "booking_request"
+  expected_tool: null
+  expected_escalation: false
+  reference_test: false
+  tags: ["intent", "booking", "ambiguous"]
+  enabled: true
+  metadata:
+    note: "Ambiguous booking — intent is clear but no tool until date, service, address, unit_count collected"

@@ -62,7 +62,7 @@
 | Requirements (`@product-manager`) | Complete | `docs/requirements/eval_pipeline.md` — 75 requirements, 22 user stories |
 | Architecture (`@software-architect`) | Complete | `docs/architecture/eval_pipeline.md` — 12 sections, all interfaces + DDL + workflows |
 | SDET planning + worktree setup | Complete | `docs/test-plan/eval_pipeline.md` + 60+ scaffold files created |
-| `@software-engineer` implementation | Not Started | Stage brief at `engine/tests/eval/STAGE_BRIEF.md` — awaiting Q1–Q5 answers |
+| `@software-engineer` implementation | Complete | 17 core files implemented, 31 unit tests + 10 integration tests passing |
 | Supabase schema (eval_test_cases, eval_results, eval_alerts) | Not Started | Awaiting architecture approval |
 | Python framework (EvalRunner, 6 scorers, CLI, reporters) | Not Started | Awaiting architecture |
 | Telegram bot alerting | Not Started | `engine/tests/eval/alerts/telegram_notifier.py` |

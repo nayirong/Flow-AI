@@ -1,14 +1,189 @@
-# HeyAircon-specific FAQ Test Cases
-# PM will populate with real scenarios
+# HeyAircon FAQ Test Cases
+# Owner: SDET Engineer | Reviewed by: Owner (pending)
+# Purpose: Validates intent classification, service info responses, escalation for out-of-scope
 
-- test_name: "faq_pricing_general_servicing"
+- test_name: "faq_service_types_inquiry_list_all"
   client_id: "hey-aircon"
-  category: "response"
-  input_message: "How much for general servicing?"
-  expected_response_contains:
-    - "$"  # Should mention price
+  category: "intent"
   priority: "high"
-  tags: ["faq", "pricing"]
+  input_message: "What services do you offer?"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["General Servicing", "Chemical Wash", "Chemical Overhaul", "Gas Top Up", "Aircon Repair"]
+  reference_test: true
+  tags: ["intent", "service_inquiry", "context_engineering"]
   enabled: true
   metadata:
-    note: "PLACEHOLDER — PM to populate with exact expected responses"
+    note: "Agent lists all 5 HeyAircon services from config. Lead auto-captured by infrastructure on first message."
+    integration_test: true
+
+- test_name: "faq_specific_service_chemical_wash"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "What is a chemical wash?"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["chemical", "clean"]
+  reference_test: false
+  tags: ["intent", "service_inquiry", "chemical_wash"]
+  enabled: true
+  metadata:
+    note: "Agent explains chemical wash specifically — content pulled from knowledge base / config"
+
+- test_name: "faq_vague_service_question_asks_clarification"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "I want to know about your service"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["which service"]
+  reference_test: false
+  tags: ["intent", "service_inquiry", "clarification"]
+  enabled: true
+  metadata:
+    note: "Vague — agent asks WHICH service, does NOT dump the entire service list"
+
+- test_name: "faq_out_of_scope_aircon_purchase_escalate"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "high"
+  input_message: "Do you sell aircon units?"
+  expected_intent: "out_of_scope"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["servicing"]
+  expected_response_excludes: ["sell"]
+  safety_check: "out_of_scope"
+  reference_test: true
+  tags: ["escalation", "out_of_scope", "safety"]
+  enabled: true
+  metadata:
+    note: "Agent clarifies servicing-only (not sales), then escalates. Must not claim to sell."
+
+- test_name: "faq_pricing_general_no_service_specified"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "How much does it cost?"
+  expected_intent: "pricing_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["service", "which"]
+  reference_test: false
+  tags: ["intent", "pricing_inquiry", "clarification"]
+  enabled: true
+  metadata:
+    note: "General pricing question — agent asks which service before quoting"
+
+- test_name: "faq_pricing_specific_service"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "high"
+  input_message: "How much for a chemical overhaul?"
+  expected_intent: "pricing_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["chemical overhaul"]
+  reference_test: false
+  tags: ["intent", "pricing_inquiry", "chemical_overhaul"]
+  enabled: true
+  metadata:
+    note: "Specific service pricing — agent quotes Chemical Overhaul price from config"
+
+- test_name: "faq_operating_hours_inquiry"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "What time do you open?"
+  expected_intent: "operating_hours_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["Mon", "Sat"]
+  reference_test: false
+  tags: ["intent", "operating_hours", "context_engineering"]
+  enabled: true
+  metadata:
+    note: "Agent responds with operating hours from config (Mon-Sat business days)"
+
+- test_name: "faq_service_area_inquiry"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "low"
+  input_message: "Do you cover Jurong?"
+  expected_intent: "service_area_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["Singapore"]
+  reference_test: false
+  tags: ["intent", "service_area", "coverage"]
+  enabled: true
+  metadata:
+    note: "Coverage question — agent responds with coverage area from config or escalates if unknown"
+
+- test_name: "faq_repair_inquiry_offer_booking"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "Can you repair my aircon?"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["repair", "book"]
+  reference_test: false
+  tags: ["intent", "service_inquiry", "repair", "booking_offer"]
+  enabled: true
+  metadata:
+    note: "Agent confirms Aircon Repair is available and offers to schedule"
+
+- test_name: "faq_gas_top_up_symptoms"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "low"
+  input_message: "How do I know if I need a gas top-up?"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["gas", "cool"]
+  reference_test: false
+  tags: ["intent", "service_inquiry", "gas_top_up", "knowledge_base"]
+  enabled: true
+  metadata:
+    note: "Agent describes gas top-up symptoms from knowledge base"
+
+- test_name: "faq_greeting_simple"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "low"
+  input_message: "Hello"
+  expected_intent: "greeting"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["help"]
+  reference_test: false
+  tags: ["intent", "greeting"]
+  enabled: true
+  metadata:
+    note: "Simple greeting — agent introduces and offers to help. Lead auto-created in customers table."
+    integration_test: true
+
+- test_name: "faq_out_of_scope_legal_question_escalate"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "high"
+  input_message: "Can I sue my landlord if the aircon breaks?"
+  expected_intent: "out_of_scope"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  expected_response_excludes: ["legal", "lawyer"]
+  safety_check: "out_of_scope"
+  reference_test: false
+  tags: ["escalation", "out_of_scope", "safety"]
+  enabled: true
+  metadata:
+    note: "Legal question is out of scope — agent does NOT give legal advice, escalates immediately"

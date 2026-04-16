@@ -12,9 +12,16 @@ Features:
 
 import asyncio
 import time
+import logging
 from typing import Optional
 
-from .base import BaseNotifier, AlertPayload
+import httpx
+
+from .base import BaseNotifier
+from ..models import AlertPayload
+
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramNotifier(BaseNotifier):
@@ -43,7 +50,6 @@ class TelegramNotifier(BaseNotifier):
         self.chat_id = chat_id
         self.thread_id = thread_id
         self.last_send_time = 0.0
-        # TODO: initialize httpx.AsyncClient
     
     async def send_alert(self, alert: AlertPayload) -> bool:
         """
@@ -52,13 +58,12 @@ class TelegramNotifier(BaseNotifier):
         Returns:
             True if HTTP 200 received, False otherwise.
         """
-        # TODO: implement
-        # - Format alert via _format_alert()
-        # - Send message via _send_message()
-        # - Return True/False based on success
-        # - Never raise
-        
-        raise NotImplementedError("TelegramNotifier.send_alert() not yet implemented")
+        try:
+            message = self._format_alert(alert)
+            return await self._send_message(message)
+        except Exception as e:
+            logger.error(f"TelegramNotifier.send_alert() failed: {e}")
+            return False
     
     async def _send_message(self, text: str) -> bool:
         """
@@ -78,39 +83,91 @@ class TelegramNotifier(BaseNotifier):
         Returns:
             True if HTTP 200 and ok=true, False otherwise.
         """
-        # TODO: implement
-        # - Enforce rate limiting (check last_send_time)
-        # - Truncate message if > 4096 chars
-        # - Build payload
-        # - POST to api.telegram.org
-        # - Return True/False
-        # - Never raise
+        try:
+            # Rate limiting
+            elapsed = time.monotonic() - self.last_send_time
+            if elapsed < 3.0:
+                await asyncio.sleep(3.0 - elapsed)
+            
+            # Truncate if needed
+            if len(text) > 4096:
+                text = text[:4093] + "..."
+            
+            # Build payload
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            payload = {
+                "chat_id": self.chat_id,
+                "text": text,
+                "parse_mode": "Markdown"
+            }
+            
+            # Add thread_id if set
+            if self.thread_id:
+                payload["message_thread_id"] = self.thread_id
+            
+            # Send request
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload)
+            
+            # Update last send time
+            self.last_send_time = time.monotonic()
+            
+            # Check response
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ok", False):
+                    return True
+                else:
+                    logger.error(f"Telegram API returned ok=false: {data}")
+                    return False
+            else:
+                logger.error(f"Telegram API returned {response.status_code}: {response.text}")
+                return False
         
-        raise NotImplementedError()
+        except Exception as e:
+            logger.error(f"TelegramNotifier._send_message() exception: {e}")
+            return False
     
     def _format_alert(self, alert: AlertPayload) -> str:
         """
         Format AlertPayload as Markdown message.
-        
-        Template:
-        
-        🚨 *Flow AI Eval Alert*
-        
-        📉 *Regression Detected*
-        **Client:** hey-aircon
-        **Run ID:** `2026-04-16T02:00:00Z-abc123`
-        
-        **Dimension:** tool_use
-        **Score:** 0.94 → 0.86 (-8%)
-        **Safety:** ✅ Pass
-        
-        **Failed Tests (5):**
-        • booking_happy_path_am_slot
-        • reschedule_policy_same_day
-        ...and 3 more
-        
-        [View Report](https://github.com/...)
-        [View Trace](https://langfuse.com/...) *(Phase 2)*
         """
-        # TODO: implement formatting
-        raise NotImplementedError()
+        lines = []
+        lines.append("*Flow AI Eval Alert*")
+        lines.append("")
+        lines.append(f"*Type:* {alert.alert_type}")
+        lines.append(f"*Environment:* {alert.environment}")
+        lines.append(f"*Client:* {alert.client_id or 'all'}")
+        lines.append(f"*Run:* {alert.run_id}")
+        lines.append("")
+        
+        if alert.dimension:
+            lines.append(f"*Dimension:* {alert.dimension}")
+        else:
+            lines.append("*Dimension:* N/A")
+        
+        if alert.score_before is not None:
+            lines.append(f"*Score before:* {alert.score_before:.2f}")
+        else:
+            lines.append("*Score before:* N/A")
+        
+        if alert.score_after is not None:
+            lines.append(f"*Score after:* {alert.score_after:.2f}")
+        else:
+            lines.append("*Score after:* N/A")
+        
+        lines.append("")
+        
+        if alert.failing_tests:
+            lines.append("*Failing tests:*")
+            for test in alert.failing_tests:
+                lines.append(f"• {test}")
+        
+        lines.append("")
+        lines.append(alert.message)
+        
+        if alert.report_url:
+            lines.append("")
+            lines.append(alert.report_url)
+        
+        return "\n".join(lines)

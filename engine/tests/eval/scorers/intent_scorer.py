@@ -7,7 +7,8 @@ Logic:
 - Else: passed=False, score=0.0, failure_reason includes expected vs actual
 """
 
-from .base import BaseScorer, ScorerResult
+from .base import BaseScorer
+from ..models import ScorerResult, TestCase, AgentOutput
 
 
 class IntentScorer(BaseScorer):
@@ -19,8 +20,8 @@ class IntentScorer(BaseScorer):
     
     async def score(
         self,
-        test_case,  # TestCase
-        agent_output,  # AgentOutput
+        test_case: TestCase,
+        agent_output: AgentOutput,
     ) -> ScorerResult:
         """
         Score intent classification.
@@ -28,9 +29,44 @@ class IntentScorer(BaseScorer):
         Returns:
             ScorerResult with passed=True if intent matches or no expectation.
         """
-        # TODO: implement
-        # - Check if expected_intent is None (skip if so)
-        # - Compare expected_intent to classified_intent (case-insensitive)
-        # - Return ScorerResult
+        try:
+            # If no expected intent, skip
+            if test_case.expected_intent is None:
+                return ScorerResult(
+                    scorer_name="intent",
+                    passed=True,
+                    score=1.0,
+                    failure_reason=None,
+                    metadata={"skipped": "no_expected_intent"}
+                )
+            
+            # Compare case-insensitive
+            expected = test_case.expected_intent.lower()
+            actual = (agent_output.classified_intent or "").lower()
+            
+            if expected == actual:
+                return ScorerResult(
+                    scorer_name="intent",
+                    passed=True,
+                    score=1.0,
+                    failure_reason=None,
+                    metadata={"expected": test_case.expected_intent, "actual": agent_output.classified_intent}
+                )
+            else:
+                return ScorerResult(
+                    scorer_name="intent",
+                    passed=False,
+                    score=0.0,
+                    failure_reason=f"Expected intent '{test_case.expected_intent}', got '{agent_output.classified_intent}'",
+                    metadata={"expected": test_case.expected_intent, "actual": agent_output.classified_intent}
+                )
         
-        raise NotImplementedError("IntentScorer.score() not yet implemented")
+        except Exception as e:
+            return ScorerResult(
+                scorer_name="intent",
+                passed=False,
+                score=0.0,
+                failure_reason=f"scorer_error: {str(e)}",
+                metadata={"exception": str(e)}
+            )
+

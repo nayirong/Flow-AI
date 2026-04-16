@@ -8,6 +8,7 @@ Fixtures:
 - mock_telegram_notifier: Mock TelegramNotifier
 """
 
+import os
 import pytest
 import asyncio
 
@@ -19,6 +20,42 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture
+def llm_provider_adapter():
+    """
+    Fixture that provides a mock LLMProviderAdapter for unit/integration tests.
+
+    In unit tests (default): returns a mock that returns canned AgentOutput.
+    In integration tests (LLM_PROVIDER set): returns real adapter using:
+      - LLM_PROVIDER=github_models + GITHUB_TOKEN (uses Copilot subscription)
+      - LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY (uses Anthropic billing)
+
+    Set LLM_PROVIDER env var in .env.test to control which provider is used
+    for integration tests. See docs/test-plan/eval_pipeline.md §9.3 for setup.
+    """
+    provider = os.getenv("LLM_PROVIDER", "mock")
+
+    if provider == "mock":
+        # Default for unit tests — no real API calls
+        class MockLLMProviderAdapter:
+            async def complete(self, messages, tools=None):
+                return {
+                    "response_text": "Mocked LLM response",
+                    "tool_called": None,
+                    "tool_params": None,
+                    "classified_intent": "booking_request",
+                    "raw_response": {},
+                }
+        return MockLLMProviderAdapter()
+
+    # For integration tests — build real adapter
+    # TODO: import and return LLMProviderAdapter(provider=provider) once implemented
+    raise NotImplementedError(
+        f"Real LLMProviderAdapter for '{provider}' not yet implemented. "
+        "See engine/tests/eval/llm_provider.py stub."
+    )
 
 
 @pytest.fixture

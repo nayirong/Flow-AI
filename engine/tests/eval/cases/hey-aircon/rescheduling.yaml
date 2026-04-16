@@ -1,15 +1,164 @@
-# HeyAircon-specific Rescheduling Test Cases
-# PM will populate with real scenarios
+# HeyAircon Rescheduling Test Cases
+# Owner: SDET Engineer | Reviewed by: Owner (pending)
+# Purpose: Validates booking lookup, reschedule/cancel escalation, policy communication
 
-- test_name: "reschedule_policy_same_day"
+- test_name: "reschedule_existing_booking_lookup_confirm_escalate"
   client_id: "hey-aircon"
-  category: "response"
-  input_message: "Can I reschedule my booking tomorrow?"
-  expected_response_contains:
-    - "reschedule"
-    - "fee"  # Should mention rescheduling fee
-  priority: "high"
-  tags: ["policy", "rescheduling"]
+  category: "multi_turn"
+  priority: "critical"
+  conversation_history:
+    - role: "user"
+      content: "I need to reschedule my booking"
+    - role: "assistant"
+      content: "I found your booking for General Servicing on April 25th in the morning slot (HA-20260425-AM-001). Would you like to reschedule this appointment?"
+  input_message: "Yes please, I need to move it to May 2nd"
+  expected_intent: "reschedule_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague", "reschedule"]
+  reference_test: true
+  tags: ["multi_turn", "tool_use", "escalation", "reschedule"]
   enabled: true
   metadata:
-    note: "PLACEHOLDER — PM to populate with exact policy details"
+    note: "Phase 1: agent cannot modify bookings — lookup, confirm with customer, escalate to human"
+    integration_test: true
+
+- test_name: "reschedule_no_existing_booking_inform_customer"
+  client_id: "hey-aircon"
+  category: "tool_use"
+  priority: "high"
+  input_message: "I want to reschedule my appointment"
+  expected_intent: "reschedule_request"
+  expected_tool: "get_customer_bookings"
+  expected_tool_params:
+    phone_number: "{{ phone_number }}"
+  expected_escalation: false
+  expected_response_contains: ["booking"]
+  expected_response_excludes: []
+  reference_test: false
+  tags: ["tool_use", "reschedule", "no_booking"]
+  enabled: true
+  metadata:
+    note: "No existing booking found — agent informs customer politely, does NOT escalate"
+
+- test_name: "reschedule_multiple_bookings_ask_which_one"
+  client_id: "hey-aircon"
+  category: "multi_turn"
+  priority: "high"
+  conversation_history:
+    - role: "user"
+      content: "I need to reschedule"
+    - role: "assistant"
+      content: "I found two upcoming bookings for you: General Servicing on April 20th morning, and Chemical Wash on April 28th afternoon. Which one would you like to reschedule?"
+  input_message: "The one on April 28th"
+  expected_intent: "reschedule_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["28", "colleague"]
+  reference_test: false
+  tags: ["multi_turn", "tool_use", "escalation", "multiple_bookings"]
+  enabled: true
+  metadata:
+    note: "Multiple bookings — agent disambiguates first, then escalates after confirmation"
+
+- test_name: "reschedule_wrong_date_mentioned_by_customer"
+  client_id: "hey-aircon"
+  category: "multi_turn"
+  priority: "medium"
+  conversation_history:
+    - role: "user"
+      content: "I need to reschedule my booking on the 25th"
+    - role: "assistant"
+      content: "I checked your bookings — I see your appointment is on April 28th, not the 25th. Would you like to reschedule the April 28th appointment?"
+  input_message: "Oh yes, that's the one"
+  expected_intent: "reschedule_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["28", "colleague"]
+  reference_test: false
+  tags: ["multi_turn", "tool_use", "escalation", "date_correction"]
+  enabled: true
+  metadata:
+    note: "Customer mentions wrong date — agent corrects from booking lookup, confirms, then escalates"
+
+- test_name: "reschedule_cancellation_request_escalate"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "critical"
+  conversation_history:
+    - role: "user"
+      content: "I want to cancel my booking"
+    - role: "assistant"
+      content: "I found your booking for General Servicing on April 30th afternoon. Is this the booking you'd like to cancel?"
+  input_message: "Yes, cancel the one on April 30th"
+  expected_intent: "cancellation_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: true
+  tags: ["escalation", "cancellation", "tool_use"]
+  enabled: true
+  metadata:
+    note: "Phase 1: agent cannot cancel bookings — always escalate cancellations to human"
+
+- test_name: "reschedule_fee_policy_inquiry"
+  client_id: "hey-aircon"
+  category: "intent"
+  priority: "medium"
+  input_message: "Is there a fee to reschedule my appointment?"
+  expected_intent: "reschedule_request"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["fee", "policy"]
+  reference_test: false
+  tags: ["intent", "reschedule", "policy", "fee"]
+  enabled: true
+  metadata:
+    note: "Reschedule fee inquiry — agent describes policy from Supabase policies table (exact fee is runtime config)"
+
+- test_name: "reschedule_same_day_urgent_cancel_escalate"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "high"
+  input_message: "My booking is in 2 hours, I need to cancel urgently!"
+  expected_intent: "cancellation_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "cancellation", "urgency", "same_day"]
+  enabled: true
+  metadata:
+    note: "Same-day urgent cancellation — agent escalates immediately"
+
+- test_name: "reschedule_with_booking_id_provided"
+  client_id: "hey-aircon"
+  category: "tool_use"
+  priority: "medium"
+  input_message: "I want to reschedule booking HA-20260422-AM-005"
+  expected_intent: "reschedule_request"
+  expected_tool: "get_customer_bookings"
+  expected_tool_params:
+    phone_number: "{{ phone_number }}"
+  expected_escalation: false
+  expected_response_contains: ["HA-20260422"]
+  reference_test: false
+  tags: ["tool_use", "reschedule", "booking_id"]
+  enabled: true
+  metadata:
+    note: "Customer provides booking_id explicitly — agent looks up and confirms the specific booking"
+
+- test_name: "reschedule_refund_request_escalate"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "high"
+  input_message: "I want to cancel and get a refund"
+  expected_intent: "cancellation_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "cancellation", "refund"]
+  enabled: true
+  metadata:
+    note: "Refund request — agent escalates immediately (complaint trigger)"

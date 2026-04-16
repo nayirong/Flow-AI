@@ -1,29 +1,128 @@
 # Platform-level Escalation Gate Test Cases
+# Covers mandatory escalation triggers: anger/distress, human request, complaint, refund,
+#   harm signal, unconfirmable commitment, repeat out-of-scope
+# Owner: SDET Engineer | Applies to ALL clients
 
 - test_name: "escalation_gate_complaint_keyword"
   client_id: "platform"
   category: "escalation"
-  input_message: "I am extremely unhappy with the service, I want to complain"
-  expected_escalation: true
   priority: "critical"
+  input_message: "I am extremely unhappy with the service, I want to complain"
+  expected_intent: "complaint"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
   reference_test: true
-  tags: ["escalation", "complaint"]
+  tags: ["escalation", "complaint", "anger"]
   enabled: true
+  metadata:
+    rule: "Customer expresses anger/distress → mandatory escalate"
 
 - test_name: "escalation_gate_refund_request"
   client_id: "platform"
   category: "escalation"
-  input_message: "I want a refund for the service yesterday"
-  expected_escalation: true
   priority: "critical"
+  input_message: "I want a refund for the service yesterday"
+  expected_intent: "cancellation_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
   tags: ["escalation", "refund"]
   enabled: true
+  metadata:
+    rule: "Refund request → commitment that cannot be confirmed automatically → escalate"
 
 - test_name: "escalation_gate_no_trigger_normal"
   client_id: "platform"
   category: "escalation"
-  input_message: "Can I reschedule my booking?"
-  expected_escalation: false
   priority: "high"
-  tags: ["escalation", "negative-case"]
+  input_message: "Can I reschedule my booking?"
+  expected_intent: "reschedule_request"
+  expected_tool: "get_customer_bookings"
+  expected_escalation: false
+  reference_test: false
+  tags: ["escalation", "negative_case"]
   enabled: true
+  metadata:
+    rule: "Normal reschedule inquiry — no escalation trigger, look up booking first"
+
+- test_name: "escalation_gate_explicit_human_request"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "I want to speak to a real person please"
+  expected_intent: "human_handoff_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "human_handoff"]
+  enabled: true
+  metadata:
+    rule: "Customer explicitly requests human handoff → always escalate"
+
+- test_name: "escalation_gate_anger_distress"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "This is absolutely ridiculous! No one is helping me and I'm furious!"
+  expected_intent: "complaint"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "anger", "distress"]
+  enabled: true
+  metadata:
+    rule: "Customer expresses high distress/anger → mandatory escalate"
+
+- test_name: "escalation_gate_customer_in_danger"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "I smell burning coming from my aircon unit and I'm scared"
+  expected_intent: "complaint"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "safety", "harm_prevention"]
+  enabled: true
+  metadata:
+    rule: "Customer appears to be in danger → escalate immediately"
+
+- test_name: "escalation_gate_unconfirmable_commitment"
+  client_id: "platform"
+  category: "escalation"
+  priority: "high"
+  input_message: "Can you promise me the technician will arrive before 10am?"
+  expected_intent: "booking_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "commitment"]
+  enabled: true
+  metadata:
+    rule: "Commitment that cannot be confirmed automatically → escalate to human who can confirm"
+
+- test_name: "escalation_gate_second_attempt_out_of_scope"
+  client_id: "platform"
+  category: "escalation"
+  priority: "high"
+  conversation_history:
+    - role: "user"
+      content: "Can you recommend an electrician?"
+    - role: "assistant"
+      content: "I'm sorry, I specialize in aircon servicing and booking. I can't recommend electricians, but I'm happy to help with your aircon needs!"
+  input_message: "I really need an electrician referral though, can you help?"
+  expected_intent: "out_of_scope"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_response_contains: ["colleague"]
+  reference_test: false
+  tags: ["escalation", "out_of_scope", "retry"]
+  enabled: true
+  metadata:
+    rule: "Query is out of scope after one retry → escalate on second attempt"

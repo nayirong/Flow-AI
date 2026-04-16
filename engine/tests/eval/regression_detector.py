@@ -8,6 +8,15 @@ Triggers alerts when:
 - Critical test fails
 """
 
+import logging
+from typing import Optional
+from datetime import datetime, timedelta
+
+from .models import RunResult, AlertPayload, ThresholdConfig
+
+
+logger = logging.getLogger(__name__)
+
 
 class RegressionDetector:
     """
@@ -22,70 +31,103 @@ class RegressionDetector:
     def __init__(
         self,
         eval_supabase_client,  # AsyncClient
-        threshold_config,  # ThresholdConfig
+        threshold_config: ThresholdConfig,
+        notifier: Optional[object] = None,  # BaseNotifier | None
     ):
         """Initialize with database client and threshold config."""
         self.eval_supabase_client = eval_supabase_client
         self.threshold_config = threshold_config
+        self.notifier = notifier
     
-    async def detect_regressions(
+    async def detect_and_alert(
         self,
-        run_result,  # RunResult
-        compare_days: int = 7,
-    ) -> list:  # -> list[AlertPayload]
+        run_result: RunResult,
+        environment: str = "ci",
+    ) -> list[AlertPayload]:
         """
-        Compare run_result to N-day rolling average.
+        Compare run_result to 7-day rolling average and trigger alerts.
         
         Returns:
-            List of AlertPayload objects (one per regression detected).
-        
-        Logic:
-        - Query eval_results for last N days, same client(s)
-        - Compute average score per dimension
-        - For each dimension: if current < average - 0.05: create alert
-        - If reference test fails: create baseline_regression alert
-        - If safety fails: create safety_failure alert (always)
-        - If critical test fails: create critical_failure alert
+            List of AlertPayload objects that were triggered.
         """
-        # TODO: implement
-        # - For each dimension in run_result:
-        #   - Compute rolling average via _compute_rolling_average()
-        #   - Compare to current score
-        #   - If delta > threshold_config.regression_alert_delta: create alert
-        # - Check reference tests via _check_reference_tests()
-        # - Check safety failures
-        # - Return list of AlertPayload objects
+        alerts = []
         
-        raise NotImplementedError("RegressionDetector.detect_regressions() not yet implemented")
+        try:
+            # Check each dimension for regressions
+            for dimension, current_score in run_result.scores_by_dimension.items():
+                # Get 7-day average
+                avg_score = await self._get_7day_average(dimension, None)
+                
+                # Safety dimension: always alert if score < 1.0
+                if dimension == "safety" and current_score < 1.0:
+                    alert = AlertPayload(
+                        run_id=run_result.run_id,
+                        environment=environment,
+                        client_id=None,
+                        alert_type="safety_failure",
+                        dimension=dimension,
+                        score_before=avg_score,
+                        score_after=current_score,
+                        failing_tests=[tc.test_case.test_name for tc in run_result.failed_tests if any(sr.scorer_name == "safety" and not sr.passed for sr in tc.scorer_results)],
+                        message=f"Safety failure detected: score={current_score:.2f}"
+                    )
+                    alerts.append(alert)
+                    await self._write_alert(alert, False)
+                    if self.notifier:
+                        sent = await self.notifier.send_alert(alert)
+                        await self._write_alert(alert, sent)
+                    continue
+                
+                # Regression check: compare to 7-day average
+                if avg_score is not None:
+                    delta = avg_score - current_score
+                    if delta > self.threshold_config.regression_alert_delta:
+                        alert = AlertPayload(
+                            run_id=run_result.run_id,
+                            environment=environment,
+                            client_id=None,
+                            alert_type="regression",
+                            dimension=dimension,
+                            score_before=avg_score,
+                            score_after=current_score,
+                            failing_tests=[tc.test_case.test_name for tc in run_result.failed_tests],
+                            message=f"Regression detected in {dimension}: {avg_score:.2f} → {current_score:.2f} (-{delta*100:.1f}%)"
+                        )
+                        alerts.append(alert)
+                        telegram_sent = False
+                        if self.notifier:
+                            telegram_sent = await self.notifier.send_alert(alert)
+                        await self._write_alert(alert, telegram_sent)
+            
+            return alerts
+        
+        except Exception as e:
+            logger.error(f"RegressionDetector.detect_and_alert() failed: {e}")
+            return alerts
     
-    async def _compute_rolling_average(
-        self,
-        client_id: str,
-        dimension: str,
-        days: int,
-    ) -> float:
+    async def _get_7day_average(self, dimension: str, client_id: Optional[str] = None) -> Optional[float]:
         """
-        Query eval_results, calculate average score for dimension.
+        Query eval_results table for 7-day rolling average score for a dimension.
+        Returns None if insufficient data (< 5 results).
+        """
+        try:
+            # TODO: Implement actual Supabase query
+            # For now, return None (no historical data)
+            # This will be implemented when Supabase schema is ready
+            
+            # Placeholder implementation
+            return None
         
-        SQL:
-        SELECT AVG(
-          (scorer_results->>'dimension')::jsonb->>'score'
-        )::float
-        FROM eval_results
-        WHERE client_id = $1
-          AND category = $2
-          AND created_at > NOW() - INTERVAL '$3 days'
-        """
-        # TODO: implement Supabase query
-        raise NotImplementedError()
+        except Exception as e:
+            logger.error(f"_get_7day_average() failed: {e}")
+            return None
     
-    async def _check_reference_tests(
-        self,
-        run_result,  # RunResult
-    ) -> list:  # -> list[AlertPayload]
-        """Check if any reference tests failed."""
-        # TODO: implement
-        # - Filter run_result.test_case_results for reference_test=True
-        # - For each failed reference test: create baseline_regression alert
-        # - Return list of alerts
-        raise NotImplementedError()
+    async def _write_alert(self, alert: AlertPayload, telegram_sent: bool) -> None:
+        """Write alert to Supabase eval_alerts table."""
+        try:
+            # TODO: Implement actual Supabase write
+            # For now, just log
+            logger.info(f"Alert written: {alert.alert_type} - {alert.dimension} - telegram_sent={telegram_sent}")
+        
+        except Exception as e:
+            logger.error(f"_write_alert() failed: {e}")

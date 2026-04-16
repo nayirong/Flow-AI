@@ -6,7 +6,8 @@ PersonaScorer: LLM-as-judge evaluation of tone and persona adherence.
 This is a placeholder stub for Phase 1.
 """
 
-from .base import BaseScorer, ScorerResult
+from .base import BaseScorer
+from ..models import ScorerResult, TestCase, AgentOutput
 
 
 class PersonaScorer(BaseScorer):
@@ -22,8 +23,8 @@ class PersonaScorer(BaseScorer):
     
     async def score(
         self,
-        test_case,  # TestCase
-        agent_output,  # AgentOutput
+        test_case: TestCase,
+        agent_output: AgentOutput,
     ) -> ScorerResult:
         """
         Score persona adherence.
@@ -34,19 +35,14 @@ class PersonaScorer(BaseScorer):
         Returns:
             ScorerResult (stub in Phase 1).
         """
-        # TODO: Phase 2 implementation
-        # - Load persona guidelines from client config
-        # - Construct LLM-as-judge prompt
-        # - Call Claude with response evaluation task
-        # - Parse score (0.0–1.0) and justification
-        # - Link to Langfuse trace
-        # - Return ScorerResult with score + justification in metadata
-        
         # Phase 1 stub: always pass
         return ScorerResult(
             scorer_name="persona",
             passed=True,
             score=1.0,
             failure_reason=None,
+            metadata={"skipped": "Phase 2"}
+        )
+
             metadata={"phase": "stub", "note": "PersonaScorer not implemented in Phase 1"},
         )

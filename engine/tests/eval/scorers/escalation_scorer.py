@@ -7,7 +7,8 @@ Logic:
 - Else: passed=False, score=0.0, failure_reason includes expected vs actual
 """
 
-from .base import BaseScorer, ScorerResult
+from .base import BaseScorer
+from ..models import ScorerResult, TestCase, AgentOutput
 
 
 class EscalationScorer(BaseScorer):
@@ -19,8 +20,8 @@ class EscalationScorer(BaseScorer):
     
     async def score(
         self,
-        test_case,  # TestCase
-        agent_output,  # AgentOutput
+        test_case: TestCase,
+        agent_output: AgentOutput,
     ) -> ScorerResult:
         """
         Score escalation gate behavior.
@@ -28,9 +29,47 @@ class EscalationScorer(BaseScorer):
         Returns:
             ScorerResult with passed=True if boolean match or no expectation.
         """
-        # TODO: implement
-        # - Check if expected_escalation is None (skip if so)
-        # - Compare expected_escalation to escalation_triggered (boolean equality)
-        # - Return ScorerResult
+        try:
+            # If no expected escalation, skip
+            if test_case.expected_escalation is None:
+                return ScorerResult(
+                    scorer_name="escalation",
+                    passed=True,
+                    score=1.0,
+                    failure_reason=None,
+                    metadata={"skipped": "no_expected_escalation"}
+                )
+            
+            # Compare boolean values
+            if test_case.expected_escalation == agent_output.escalation_triggered:
+                return ScorerResult(
+                    scorer_name="escalation",
+                    passed=True,
+                    score=1.0,
+                    failure_reason=None,
+                    metadata={
+                        "expected": test_case.expected_escalation,
+                        "actual": agent_output.escalation_triggered
+                    }
+                )
+            else:
+                return ScorerResult(
+                    scorer_name="escalation",
+                    passed=False,
+                    score=0.0,
+                    failure_reason=f"Expected escalation={test_case.expected_escalation}, got escalation={agent_output.escalation_triggered}",
+                    metadata={
+                        "expected": test_case.expected_escalation,
+                        "actual": agent_output.escalation_triggered
+                    }
+                )
         
-        raise NotImplementedError("EscalationScorer.score() not yet implemented")
+        except Exception as e:
+            return ScorerResult(
+                scorer_name="escalation",
+                passed=False,
+                score=0.0,
+                failure_reason=f"scorer_error: {str(e)}",
+                metadata={"exception": str(e)}
+            )
+

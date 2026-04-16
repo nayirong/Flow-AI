@@ -1186,39 +1186,32 @@ CREATE TABLE client_baselines (
 
 ### Q3: Reference Test Override Approval
 
-**Question:** Should reference test override require specific GitHub team approval?
-
-**Options:**
-- A. Same as standard `eval-override` label (any maintainer can add)
-- B. Require approval from a specific team (via CODEOWNERS)
-
-**Recommendation:** Option A for Phase 1 (simplicity). Add team approval gate in Phase 2 if needed.
+**Decision:** Option A for Phase 1 — any maintainer can add `eval-override` label. Add team approval gate in Phase 2 if needed.
 
 ---
 
 ### Q4: Test Case YAML Authorship
 
-**Question:** Who writes the platform-level YAML test cases?
+**Decision:** SDET writes all platform-level YAML test cases for Phase 1.
 
-**Options:**
-- A. SDET writes all platform-level cases
-- B. PM writes, SDET reviews
-- C. Shared responsibility
+**User review and contribution process:**
 
-**Recommendation:** Option A for Phase 1 (SDET owns quality gates). Transition to Option C once PM ramps up.
+- **Review:** All YAML test cases are version-controlled in `engine/tests/eval/cases/`. The project owner reviews them via GitHub PR before merge — SDET must request review from the owner on any PR that adds or modifies test cases.
+- **Adding new cases (two paths):**
+  1. **Via Git PR** — add a row to the relevant YAML file and open a PR. SDET reviews for schema correctness, owner approves content.
+  2. **Via Supabase Studio** — insert directly into `eval_test_cases` table with the correct `client_id` and `category`. Takes effect on the next eval run with no Git required. SDET syncs important cases back to YAML files periodically.
+- **No access restriction** — the owner has full write access to YAML files and Supabase Studio at all times.
 
 ---
 
 ### Q5: Real-Endpoint Verification for Integration Tests
 
-**Question:** Should integration tests verify against a real Supabase instance or use mocks?
+**Decision:** Hybrid approach.
 
-**Options:**
-- A. Use a dedicated test Supabase project (real DB, isolated data)
-- B. Use mocks for all integration tests
-- C. Hybrid: mocks for unit tests, real DB for integration tests
+- **Unit tests** — all mocked, no real API calls, no real DB
+- **Integration tests** — use a dedicated test Supabase project for real DB writes; use real LLM API for agent execution tests (see Section 9 for which LLM provider to use)
 
-**Recommendation:** Option C. Integration tests should verify real DB writes to catch schema mismatches.
+See **Section 9: How to Run Tests** for the step-by-step guide on setting up both tiers.
 
 ---
 
@@ -1236,6 +1229,278 @@ Implementation is ready for merge when:
 8. ✅ Telegram mock sends correct payload (verified via `pytest-httpx`)
 9. ✅ GitHub Actions workflows validated (manual trigger on test branch)
 10. ✅ All open questions answered and documented in PR
+
+---
+
+## 9. How to Run Tests — Hybrid Testing Guide
+
+This section is the complete step-by-step guide for running all tiers of the test suite locally and in CI.
+
+---
+
+### 9.1 Two-Tier Architecture
+
+| Tier | What Runs | API Keys Needed | DB Needed |
+|------|-----------|-----------------|----------|
+| **Unit tests** | Scorers, Telegram notifier, regression detector | None — all mocked | None — all mocked |
+| **Integration tests** | EvalRunner end-to-end, TestCaseLoader, CLI, Supabase writes | LLM API (see §9.3) | Test Supabase project |
+
+---
+
+### 9.2 Local Setup (One-Time)
+
+**Step 1 — Clone and install dependencies**
+
+```bash
+cd /path/to/flow-ai
+pip install -r requirements.txt
+pip install -r requirements-dev.txt   # includes pytest, pytest-asyncio, pytest-httpx
+```
+
+**Step 2 — Create `.env.test`** (never commit this file)
+
+Create `engine/tests/eval/.env.test` with the following keys:
+
+```env
+# --- LLM Provider (choose one — see §9.3) ---
+LLM_PROVIDER=github_models           # or: anthropic
+GITHUB_TOKEN=ghp_xxxxxxxxxxxx        # if LLM_PROVIDER=github_models
+# ANTHROPIC_API_KEY=sk-ant-...       # if LLM_PROVIDER=anthropic
+
+# --- Test Supabase (integration tests only) ---
+EVAL_SUPABASE_URL=https://your-test-project.supabase.co
+EVAL_SUPABASE_SERVICE_KEY=eyJhbGci...
+
+# --- HeyAircon test client Supabase (for AgentExecutor integration tests) ---
+HEYAIRCON_SUPABASE_URL=https://hey-aircon-test.supabase.co
+HEYAIRCON_SUPABASE_SERVICE_KEY=eyJhbGci...
+
+# --- Telegram (for alert integration tests — use real bot or test bot) ---
+TELEGRAM_BOT_TOKEN=                  # leave empty to skip Telegram integration tests
+TELEGRAM_CHAT_ID=                    # leave empty to skip
+
+# --- Eval settings ---
+EVAL_LOG_LEVEL=DEBUG
+EVAL_PARALLELISM=3                   # reduce for local runs
+```
+
+**Step 3 — Provision test Supabase project**
+
+1. Create a free Supabase project at supabase.com (separate from prod — name it `flow-ai-eval-test`)
+2. In the SQL editor, run the DDL from `docs/architecture/eval_pipeline.md` Section 5
+3. Verify tables created: `eval_test_cases`, `eval_results`, `eval_alerts`, `client_baselines`
+4. Copy the project URL and service key into `.env.test`
+
+**Step 4 — Verify setup**
+
+```bash
+cd engine/tests/eval
+python -c "from dotenv import load_dotenv; load_dotenv('.env.test'); import os; print(os.getenv('LLM_PROVIDER'))"
+# Expected output: github_models
+```
+
+---
+
+### 9.3 LLM Provider for Local Testing
+
+The evaluation pipeline calls Claude to run the agent during integration tests. You have two options:
+
+#### Option A: GitHub Models API (Recommended for local dev — uses Copilot subscription)
+
+You can use your active **GitHub Copilot** subscription to make Claude API calls without a separate Anthropic billing account. GitHub provides Claude access through the GitHub Models API, an OpenAI-compatible endpoint authenticated with a `GITHUB_TOKEN`.
+
+**Setup:**
+
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) → Generate a fine-grained token with `models: read` permission (or use a classic token with `repo` scope)
+2. Set in `.env.test`:
+   ```env
+   LLM_PROVIDER=github_models
+   GITHUB_TOKEN=ghp_your_token_here
+   LLM_MODEL_OVERRIDE=claude-claude-sonnet-4-6-20250219  # exact name in GitHub Models catalog
+   ```
+3. Verify access:
+   ```bash
+   curl -H "Authorization: Bearer $GITHUB_TOKEN" \
+     "https://models.inference.ai.azure.com/v1/models" | python -m json.tool | grep claude
+   ```
+
+**How it works in the eval framework:**
+
+The `AgentExecutor` checks `LLM_PROVIDER` at startup and constructs the appropriate client:
+- `github_models` → `openai.AsyncOpenAI(api_key=GITHUB_TOKEN, base_url="https://models.inference.ai.azure.com/v1")`
+- `anthropic` → `anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)`
+
+The agent response format is normalized by the `LLMProviderAdapter` before scoring — callers always receive the same `AgentOutput` shape regardless of provider.
+
+**Rate limits:** GitHub Models has rate limits on free/Copilot tier. For integration tests, `EVAL_PARALLELISM=3` is recommended locally to avoid hitting limits.
+
+#### Option B: Anthropic API Key (CI/production)
+
+```env
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+This is what GitHub Actions uses. You should have one Anthropic API key for CI only — it does not need to be shared locally.
+
+> **Note on Claude Code subscription:** Claude Code (claude.ai) is a web/desktop application. It does not expose the underlying API programmatically — you cannot use a Claude Code subscription to make script-level API calls. Use GitHub Models (Option A) instead for local development.
+
+---
+
+### 9.4 Running Unit Tests (No API, No DB)
+
+Unit tests mock all external calls. No environment setup required beyond Python dependencies.
+
+```bash
+# Run all unit tests
+pytest engine/tests/eval/unit/ -v
+
+# Run a specific scorer test
+pytest engine/tests/eval/unit/test_safety_scorer.py -v
+
+# Run with coverage
+pytest engine/tests/eval/unit/ -v --cov=engine/tests/eval --cov-report=term-missing
+```
+
+**Expected output:** All tests pass. No network calls. Completes in < 10 seconds.
+
+**What is mocked:**
+- `agent_runner.run_agent` → returns canned `AgentOutput` via `conftest.mock_agent_runner`
+- `httpx.AsyncClient.post` → mocked via `pytest-httpx` in Telegram tests
+- Supabase client → `conftest.mock_supabase_client`
+
+---
+
+### 9.5 Running Integration Tests (Real Supabase + Real LLM)
+
+Integration tests use a real test Supabase project and real LLM API calls.
+
+**Prerequisites:** `.env.test` fully populated (§9.2), test Supabase tables created (§9.2 Step 3)
+
+```bash
+# Load env and run all integration tests
+dotenv -f engine/tests/eval/.env.test run -- pytest engine/tests/eval/integration/ -v
+
+# Or export manually:
+export $(cat engine/tests/eval/.env.test | grep -v '^#' | xargs)
+pytest engine/tests/eval/integration/ -v
+
+# Run just the end-to-end runner test
+pytest engine/tests/eval/integration/test_eval_runner.py::test_eval_run_with_mock_agent -v
+
+# Run with real agent execution (uses LLM API)
+pytest engine/tests/eval/integration/test_eval_runner.py -v -k "real_agent"
+```
+
+**What integration tests verify:**
+- `test_eval_runner.py` — full pipeline run writes correct rows to `eval_results` in test Supabase
+- `test_loader.py` — YAML + Supabase merge, deduplication, filter flags
+- `test_cli.py` — all CLI flags produce correct behavior and exit codes
+
+**Approximate runtime:** 1–3 minutes (depending on LLM provider latency)
+
+---
+
+### 9.6 Running the Full Suite Locally
+
+```bash
+# All tests (unit + integration)
+export $(cat engine/tests/eval/.env.test | grep -v '^#' | xargs)
+pytest engine/tests/eval/ -v
+
+# Skip integration tests (fast, no API needed)
+pytest engine/tests/eval/ -v -m "not integration"
+
+# Run only critical priority tests
+pytest engine/tests/eval/ -v -k "critical"
+```
+
+**Add markers to pytest.ini (or pyproject.toml):**
+
+```ini
+[pytest]
+markers =
+    integration: marks tests requiring real Supabase and LLM API
+    unit: marks tests that use only mocks
+    slow: marks tests that take > 30 seconds
+asyncio_mode = auto
+```
+
+---
+
+### 9.7 Running the Eval CLI Locally
+
+Once the framework is implemented, you can run the eval CLI directly:
+
+```bash
+export $(cat engine/tests/eval/.env.test | grep -v '^#' | xargs)
+
+# Dry run — load test cases, no LLM calls
+python -m engine.tests.eval.run_eval --dry-run
+
+# Run for HeyAircon only
+python -m engine.tests.eval.run_eval --client hey-aircon
+
+# Run safety tests only
+python -m engine.tests.eval.run_eval --category safety
+
+# Run a single test case by name
+python -m engine.tests.eval.run_eval --test-name "safety_no_identity_claim" --debug
+
+# Baseline run (save as reference for this client)
+python -m engine.tests.eval.run_eval --client hey-aircon --baseline --save-baseline
+
+# Compare current results to saved baseline
+python -m engine.tests.eval.run_eval --client hey-aircon --compare-baseline
+```
+
+---
+
+### 9.8 Adding Test Cases
+
+**As YAML (version-controlled — preferred for platform behaviors):**
+
+1. Open the relevant file in `engine/tests/eval/cases/`
+2. Add a new entry following the YAML schema in architecture doc Section 11
+3. Run `--dry-run` to validate the case loads correctly:
+   ```bash
+   python -m engine.tests.eval.run_eval --dry-run
+   ```
+4. Open a PR — SDET reviews schema, owner approves content
+
+**Via Supabase Studio (no Git required — good for client-specific edge cases):**
+
+1. Open the test Supabase project in Supabase Studio
+2. Navigate to Table Editor → `eval_test_cases`
+3. Insert a new row with the required fields (use an existing row as reference)
+4. Verify `enabled = TRUE`, `client_id` matches the target client
+5. Run the eval CLI to verify the new case is picked up:
+   ```bash
+   python -m engine.tests.eval.run_eval --dry-run --client <your-client-id>
+   ```
+6. If the case is broadly applicable or catches a real regression, add it to YAML as well for version control
+
+---
+
+### 9.9 Verifying GitHub Actions Workflows
+
+**Test CI workflow locally with `act` (optional):**
+
+```bash
+brew install act
+act pull_request --secret-file .env.test -W .github/workflows/eval-ci.yml
+```
+
+**Test by opening a PR:**
+1. Create a branch: `git checkout -b test/eval-workflow`
+2. Make a minor change to any file in `engine/`
+3. Push and open a PR — the `eval-ci.yml` workflow should trigger automatically
+4. Verify: workflow runs, posts PR comment, exits 0 (if all tests pass)
+
+**Test the scheduled workflow manually:**
+1. Go to GitHub Actions tab → `Production Evaluation Monitoring`
+2. Click "Run workflow" → "Run workflow"
+3. Verify: workflow runs, regression detector runs, Telegram alert sent if bot is configured
 
 ---
 
