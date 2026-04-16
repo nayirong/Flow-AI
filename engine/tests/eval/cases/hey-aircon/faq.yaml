@@ -1,0 +1,14 @@
+# HeyAircon-specific FAQ Test Cases
+# PM will populate with real scenarios
+
+- test_name: "faq_pricing_general_servicing"
+  client_id: "hey-aircon"
+  category: "response"
+  input_message: "How much for general servicing?"
+  expected_response_contains:
+    - "$"  # Should mention price
+  priority: "high"
+  tags: ["faq", "pricing"]
+  enabled: true
+  metadata:
+    note: "PLACEHOLDER — PM to populate with exact expected responses"

@@ -1,0 +1,28 @@
+# Platform-level Intent Classification Test Cases
+
+- test_name: "intent_greeting"
+  client_id: "platform"
+  category: "intent"
+  input_message: "Hi there!"
+  expected_intent: "greeting"
+  priority: "low"
+  tags: ["intent", "conversation"]
+  enabled: true
+
+- test_name: "intent_booking_request_explicit"
+  client_id: "platform"
+  category: "intent"
+  input_message: "I want to book a service"
+  expected_intent: "booking_request"
+  priority: "high"
+  tags: ["intent", "booking"]
+  enabled: true
+
+- test_name: "intent_pricing_inquiry"
+  client_id: "platform"
+  category: "intent"
+  input_message: "How much does it cost?"
+  expected_intent: "pricing_inquiry"
+  priority: "medium"
+  tags: ["intent", "faq"]
+  enabled: true

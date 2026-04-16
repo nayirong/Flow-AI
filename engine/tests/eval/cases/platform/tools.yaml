@@ -1,0 +1,21 @@
+# Platform-level Tool Use Test Cases
+
+- test_name: "tool_check_calendar_basic"
+  client_id: "platform"
+  category: "tool_use"
+  input_message: "Are you available this Saturday morning?"
+  expected_tool: "check_calendar_availability"
+  expected_tool_params:
+    timezone: "Asia/Singapore"
+  priority: "critical"
+  tags: ["tool", "calendar"]
+  enabled: true
+
+- test_name: "tool_wrong_tool_selected"
+  client_id: "platform"
+  category: "tool_use"
+  input_message: "What's your phone number?"
+  expected_tool: null  # Should not call any tool for this
+  priority: "medium"
+  tags: ["tool", "negative-case"]
+  enabled: true

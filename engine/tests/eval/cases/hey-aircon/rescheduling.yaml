@@ -1,0 +1,15 @@
+# HeyAircon-specific Rescheduling Test Cases
+# PM will populate with real scenarios
+
+- test_name: "reschedule_policy_same_day"
+  client_id: "hey-aircon"
+  category: "response"
+  input_message: "Can I reschedule my booking tomorrow?"
+  expected_response_contains:
+    - "reschedule"
+    - "fee"  # Should mention rescheduling fee
+  priority: "high"
+  tags: ["policy", "rescheduling"]
+  enabled: true
+  metadata:
+    note: "PLACEHOLDER — PM to populate with exact policy details"

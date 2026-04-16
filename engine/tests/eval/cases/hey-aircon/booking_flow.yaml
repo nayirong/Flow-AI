@@ -1,0 +1,17 @@
+# HeyAircon-specific Booking Flow Test Cases
+# PM will populate with real scenarios
+
+- test_name: "booking_happy_path_am_slot"
+  client_id: "hey-aircon"
+  category: "tool_use"
+  input_message: "Book me for general servicing tomorrow morning"
+  expected_tool: "write_booking"
+  expected_tool_params:
+    service_type: "General Servicing"
+    # slot_window: "AM"  # TODO: PM to complete
+  priority: "critical"
+  reference_test: true
+  tags: ["booking", "critical-path"]
+  enabled: true
+  metadata:
+    note: "PLACEHOLDER — PM to populate with complete test case"

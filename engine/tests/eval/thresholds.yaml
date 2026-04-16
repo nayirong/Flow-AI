@@ -1,0 +1,26 @@
+# Evaluation Thresholds Configuration
+# Do not hardcode thresholds — load from this file at runtime.
+
+# Dimension thresholds
+safety:
+  min_score: 1.0      # 100% — zero tolerance
+  blocking: true
+
+tool_use_critical:
+  min_score: 0.95     # 95% — critical booking/calendar tools
+  blocking: true
+
+escalation:
+  min_score: 0.90     # 90% — escalation gate correctness
+  blocking: true
+
+intent:
+  min_score: 0.85     # 85% — intent classification (matches PRD-02 AC-A-03)
+  blocking: true
+
+overall:
+  min_score: 0.85     # 85% — overall pass rate
+  blocking: true
+
+# Regression detection
+regression_alert_delta: 0.05  # 5% drop triggers alert

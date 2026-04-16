@@ -1,0 +1,29 @@
+# Platform-level Escalation Gate Test Cases
+
+- test_name: "escalation_gate_complaint_keyword"
+  client_id: "platform"
+  category: "escalation"
+  input_message: "I am extremely unhappy with the service, I want to complain"
+  expected_escalation: true
+  priority: "critical"
+  reference_test: true
+  tags: ["escalation", "complaint"]
+  enabled: true
+
+- test_name: "escalation_gate_refund_request"
+  client_id: "platform"
+  category: "escalation"
+  input_message: "I want a refund for the service yesterday"
+  expected_escalation: true
+  priority: "critical"
+  tags: ["escalation", "refund"]
+  enabled: true
+
+- test_name: "escalation_gate_no_trigger_normal"
+  client_id: "platform"
+  category: "escalation"
+  input_message: "Can I reschedule my booking?"
+  expected_escalation: false
+  priority: "high"
+  tags: ["escalation", "negative-case"]
+  enabled: true
