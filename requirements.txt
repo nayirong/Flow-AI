@@ -1,0 +1,3 @@
+# Root-level requirements — mirrors engine/requirements.txt.
+# Railway nixpacks picks this up automatically from the repo root.
+-r engine/requirements.txt
