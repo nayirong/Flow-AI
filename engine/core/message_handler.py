@@ -20,7 +20,7 @@ from engine.integrations.supabase_client import get_client_db
 from engine.integrations.meta_whatsapp import send_message
 from engine.core.context_builder import build_system_message, fetch_conversation_history
 from engine.core.agent_runner import run_agent
-from engine.core.tools import TOOL_DEFINITIONS, TOOL_DISPATCH
+from engine.core.tools import TOOL_DEFINITIONS, build_tool_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -179,12 +179,13 @@ async def handle_inbound_message(
         try:
             system_message = await build_system_message(db)
             history = await fetch_conversation_history(db, phone_number)
+            tool_dispatch = build_tool_dispatch(db, client_config, phone_number)
             agent_reply = await run_agent(
                 system_message=system_message,
                 conversation_history=history,
                 current_message=message_text,
                 tool_definitions=TOOL_DEFINITIONS,
-                tool_dispatch=TOOL_DISPATCH,
+                tool_dispatch=tool_dispatch,
             )
         except Exception as e:
             logger.error(
