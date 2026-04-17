@@ -36,24 +36,22 @@ async def test_load_client_config_success(mock_env_vars, mock_supabase_client, c
 async def test_load_client_config_not_found(mock_env_vars, clear_client_config_cache):
     """Test that load_client_config raises ClientNotFoundError for unknown client."""
     from engine.config.client_config import load_client_config, ClientNotFoundError
-    
-    # Mock Supabase to return empty result
-    mock_client = MagicMock()
+
     mock_response = MagicMock()
-    mock_response.data = []  # No rows found
-    
+    mock_response.data = []
     mock_execute = AsyncMock(return_value=mock_response)
-    mock_limit = MagicMock()
-    mock_limit.execute = mock_execute
-    mock_eq = MagicMock(return_value=mock_limit)
-    mock_select = MagicMock()
-    mock_select.eq = mock_eq
-    mock_client.table = MagicMock(return_value=mock_select)
-    
-    with patch("engine.config.client_config.get_shared_db", return_value=mock_client):
+    chain = MagicMock()
+    chain.select.return_value = chain
+    chain.eq.return_value = chain
+    chain.limit.return_value = chain
+    chain.execute = mock_execute
+    mock_client = MagicMock()
+    mock_client.table.return_value = chain
+
+    with patch("engine.config.client_config.get_shared_db", new_callable=AsyncMock, return_value=mock_client):
         with pytest.raises(ClientNotFoundError) as exc_info:
             await load_client_config("unknown-client")
-        
+
         assert "unknown-client" in str(exc_info.value)
 
 
@@ -73,11 +71,11 @@ async def test_load_client_config_caching(mock_env_vars, mock_supabase_client, c
         # First call — should hit DB
         config1 = await load_client_config("hey-aircon")
         assert call_count == 1
-        
+
         # Second call within TTL — should use cache
         config2 = await load_client_config("hey-aircon")
         assert call_count == 1  # No additional DB call
-        
+
         assert config1.client_id == config2.client_id
 
 
@@ -112,31 +110,19 @@ async def test_load_client_config_ttl_expiry(mock_env_vars, mock_supabase_client
 async def test_load_client_config_inactive_client(mock_env_vars, clear_client_config_cache):
     """Test that inactive client (is_active=False) raises ClientNotFoundError."""
     from engine.config.client_config import load_client_config, ClientNotFoundError
-    
-    # Mock Supabase to return row with is_active=False
-    mock_client = MagicMock()
+
+    # The query filters by is_active=TRUE so returns no rows for inactive client
     mock_response = MagicMock()
-    mock_response.data = [{
-        "client_id": "inactive-client",
-        "is_active": False,
-        "meta_phone_number_id": "123",
-        "meta_verify_token": "token",
-        "human_agent_number": "+65",
-        "google_calendar_id": "cal",
-    }]
-    
+    mock_response.data = []
     mock_execute = AsyncMock(return_value=mock_response)
-    mock_limit = MagicMock()
-    mock_limit.execute = mock_execute
-    mock_eq = MagicMock(return_value=mock_limit)
-    mock_select = MagicMock()
-    mock_select.eq = mock_eq
-    mock_client.table = MagicMock(return_value=mock_select)
-    
-    with patch("engine.config.client_config.get_shared_db", return_value=mock_client):
-        # The query filters by is_active=TRUE, so data should be empty
-        # Adjust mock to reflect this
-        mock_response.data = []
-        
+    chain = MagicMock()
+    chain.select.return_value = chain
+    chain.eq.return_value = chain
+    chain.limit.return_value = chain
+    chain.execute = mock_execute
+    mock_client = MagicMock()
+    mock_client.table.return_value = chain
+
+    with patch("engine.config.client_config.get_shared_db", new_callable=AsyncMock, return_value=mock_client):
         with pytest.raises(ClientNotFoundError):
             await load_client_config("inactive-client")

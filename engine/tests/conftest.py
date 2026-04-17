@@ -22,7 +22,13 @@ def mock_env_vars(monkeypatch):
     }
     for key, value in env_vars.items():
         monkeypatch.setenv(key, value)
-    return env_vars
+
+    # Reset the lazy singleton so it re-reads the mocked env vars
+    import engine.config.settings as _settings_mod
+    _settings_mod._settings_instance = None
+    yield env_vars
+    # Reset again after test so next test starts clean
+    _settings_mod._settings_instance = None
 
 
 @pytest.fixture
@@ -42,32 +48,80 @@ def mock_supabase_clients_row():
 
 @pytest.fixture
 def mock_supabase_client(mock_supabase_clients_row):
-    """Mock Supabase AsyncClient with table() method chain."""
+    """Mock Supabase AsyncClient with a fully chainable table() method."""
     mock_response = MagicMock()
     mock_response.data = [mock_supabase_clients_row]
-    
+
     mock_execute = AsyncMock(return_value=mock_response)
-    
-    mock_limit = MagicMock()
-    mock_limit.execute = mock_execute
-    
-    mock_eq = MagicMock(return_value=mock_limit)
-    
-    mock_select = MagicMock()
-    mock_select.eq = mock_eq
-    
-    mock_table = MagicMock(return_value=mock_select)
-    
+
+    # Chainable mock: every method call returns self, except execute() which is AsyncMock
+    chain = MagicMock()
+    chain.select.return_value = chain
+    chain.eq.return_value = chain
+    chain.limit.return_value = chain
+    chain.order.return_value = chain
+    chain.execute = mock_execute
+
     client = MagicMock()
-    client.table = mock_table
-    
+    client.table.return_value = chain
+
     return client
 
 
 @pytest.fixture
 def clear_client_config_cache():
     """Clear the client config cache between tests."""
-    # This will be imported and used by test_client_config.py
-    # The actual cache clearing logic will be implemented by @software-engineer
+    from engine.config import client_config
+    # Clear cache before test
+    client_config._cache.clear()
     yield
-    # Cache clearing happens here after test runs
+    # Clear cache after test
+    client_config._cache.clear()
+
+
+@pytest.fixture
+def sample_meta_payload():
+    """Valid Meta inbound message webhook payload."""
+    return {
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "messages": [{
+                        "from": "6591234567",
+                        "id": "wamid.test123",
+                        "type": "text",
+                        "text": {"body": "Hello, I need aircon servicing"}
+                    }],
+                    "contacts": [{
+                        "profile": {"name": "John Tan"},
+                        "wa_id": "6591234567"
+                    }]
+                }
+            }]
+        }]
+    }
+
+
+@pytest.fixture
+def sample_meta_status_payload():
+    """Meta status update payload (no messages — should be ignored)."""
+    return {
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "statuses": [{"status": "delivered", "id": "wamid.test123"}]
+                }
+            }]
+        }]
+    }
+
+
+@pytest.fixture
+def mock_client_config_obj():
+    """Mock ClientConfig for webhook tests."""
+    from unittest.mock import MagicMock
+    config = MagicMock()
+    config.meta_verify_token = "heyaircon_webhook_2026"
+    config.meta_phone_number_id = "123456789"
+    config.meta_whatsapp_token = "test_token"
+    return config

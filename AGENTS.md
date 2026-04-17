@@ -81,7 +81,8 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 | Supabase as CRM (migrated from Google Sheets) | `mvp_scope.md` §Stack Migration |
 | Context engineering — business data in DB, not hardcoded | `00_architecture_reference.md` §8, `mvp_scope.md` |
 | Binary escalation gate (Phase 1) | `mvp_scope.md` §DR-001 |
-| LLM: GPT-4o-mini (current) → Claude claude-sonnet-4-6 (migration target) | `00_architecture_reference.md` §8 |
+| LLM starting model: Claude Haiku 4.5 | Decided 2026-04-17 — lower cost, sufficient for booking flows; upgrade to Sonnet if eval scores fall short |
+| LLM fallback: GPT-4o-mini (OpenAI) | Decided 2026-04-17 — activated per-request when Anthropic API unreachable; retries Anthropic on next message |
 | n8n → Python orchestration engine (planned) | Decided 2026-04-15 — finish n8n D/E first, then build Python in parallel |
 | Client config isolation: hybrid approach | Decided 2026-04-15 — non-sensitive fields in Supabase `clients` table; `meta_whatsapp_token` + `supabase_url` + `supabase_service_key` in Railway env vars (namespaced). Migrate to secrets manager at 10–20 clients. |
 | Monorepo | Decided 2026-04-15 — single repo; split before client 3 |

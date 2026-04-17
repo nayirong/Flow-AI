@@ -15,7 +15,8 @@ Flow AI is a vertical AI agent platform for service SMEs in SEA. It automates cu
 | Layer | Choice | Notes |
 |-------|--------|-------|
 | Orchestration engine | FastAPI (Python, async) | Replaces n8n |
-| LLM | Claude claude-sonnet-4-6 (Anthropic SDK) | Direct SDK — no LangChain |
+| LLM (primary) | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Starting model — eval performance before upgrading to Sonnet |
+| LLM (fallback) | GPT-4o-mini (OpenAI SDK) | Activated when Anthropic API is unreachable |
 | Database | Supabase (Postgres) | All client data + shared config DB |
 | WhatsApp | Meta Cloud API direct | No BSP (no 360dialog) |
 | Calendar | Google Calendar API (service account) | Add-only from agent |
@@ -24,6 +25,35 @@ Flow AI is a vertical AI agent platform for service SMEs in SEA. It automates cu
 | Testing | pytest + pytest-asyncio + httpx | Standard async Python stack |
 
 **Do not use LangChain.** Use the Anthropic SDK directly. The agent loop is simple enough to own explicitly.
+
+---
+
+## LLM Strategy
+
+### Starting model: Claude Haiku 4.5
+The engine launches with `claude-haiku-4-5-20251001`. Rationale: lower cost per conversation during early production, fast response times, and sufficient capability for structured booking flows. The eval pipeline runs against every build to measure real performance across intent classification, tool use accuracy, escalation correctness, safety, and response quality.
+
+**Upgrade path:** If eval scores fall below acceptable thresholds (defined in `engine/tests/eval/thresholds.yaml`), upgrade to `claude-sonnet-4-6`. Model is controlled by a single env var `LLM_MODEL` — no code changes needed to switch.
+
+| Model | When to use | Env var value |
+|-------|-------------|---------------|
+| Claude Haiku 4.5 | Default — start here | `claude-haiku-4-5-20251001` |
+| Claude Sonnet 4.6 | If Haiku eval scores insufficient | `claude-sonnet-4-6` |
+
+### Fallback: GPT-4o-mini (OpenAI)
+When the Anthropic API is unreachable (timeout, 5xx, rate limit exhausted), the engine falls back to GPT-4o-mini via the OpenAI SDK. The fallback is transparent to the customer — same system prompt, same tool definitions, same response format.
+
+**Fallback logic (in `agent_runner.py`):**
+1. Attempt Anthropic call with 10-second timeout
+2. On `anthropic.APIConnectionError`, `anthropic.APIStatusError` (5xx), or timeout → log warning, switch to OpenAI GPT-4o-mini
+3. On OpenAI failure → log error, send customer a graceful "we're experiencing issues" reply, do not crash
+
+**Fallback is not a permanent switch.** Each new inbound message retries Anthropic first. The fallback activates per-request only.
+
+**Required env vars for fallback:**
+- `OPENAI_API_KEY` — required for fallback to work
+- `OPENAI_FALLBACK_MODEL` — default `gpt-4o-mini`
+- `LLM_FALLBACK_ENABLED` — default `true` (set to `false` to disable fallback during testing)
 
 ---
 

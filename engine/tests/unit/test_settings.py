@@ -25,13 +25,13 @@ def test_settings_raises_on_missing_required_field(monkeypatch):
     # Set all env vars except one required field
     monkeypatch.setenv("SHARED_SUPABASE_URL", "https://shared.supabase.co")
     monkeypatch.setenv("SHARED_SUPABASE_SERVICE_KEY", "key")
-    # Missing: ANTHROPIC_API_KEY
-    
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
     from engine.config.settings import Settings
-    
+
     with pytest.raises(ValidationError) as exc_info:
         Settings()
-    
+
     # Verify the error mentions the missing field
     assert "anthropic_api_key" in str(exc_info.value).lower()
 
