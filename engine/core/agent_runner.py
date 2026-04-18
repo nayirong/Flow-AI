@@ -3,7 +3,9 @@ Claude agent runner — tool-use loop for the Flow AI engine.
 
 Provider shim
 ─────────────
-Production (Railway):       LLM_PROVIDER=anthropic  → Anthropic SDK directly
+Production (Railway):       LLM_PROVIDER=anthropic  → Anthropic SDK (Haiku 4.5 primary)
+                            Fallback:                → GPT-4o-mini via OpenAI SDK
+                                                       (silent, per-request, on Anthropic error)
 Local eval / testing:       LLM_PROVIDER=github_models → GitHub Models API
                                                           (OpenAI-compatible, uses
                                                            GITHUB_TOKEN, covered by
@@ -14,11 +16,11 @@ The shim is internal to this module. No other part of the engine knows about it.
 
 Tool-use loop
 ─────────────
-1. Call LLM with system message, history + current message, and tool definitions.
-2. If stop_reason == "tool_use": extract tool blocks, execute each, append results, loop.
-3. If stop_reason == "end_turn": extract final text response, return.
-4. Hard cap of MAX_TOOL_ITERATIONS (10) to prevent infinite loops.
-5. Any LLM API error propagates to the caller (message_handler catches it).
+1. Call primary LLM (Anthropic Haiku 4.5) with system message, history + current message, and tool definitions.
+2. On Anthropic APIConnectionError, APIStatusError(5xx), or timeout → silent switch to GPT-4o-mini.
+3. If stop_reason == "tool_use": execute tools, append results, loop (up to MAX_TOOL_ITERATIONS).
+4. If stop_reason == "end_turn": return final text response.
+5. Fallback is per-request only — next message retries Anthropic first.
 """
 import json
 import logging
@@ -84,19 +86,38 @@ def _get_model_name() -> str:
     """
     Return the model identifier for the active provider.
 
-    Can be overridden via LLM_MODEL_OVERRIDE env var for testing.
+    Can be overridden via LLM_MODEL env var (or LLM_MODEL_OVERRIDE for tests).
     Defaults:
-        anthropic      → claude-sonnet-4-6
-        github_models  → claude-sonnet-4-6-20250219  (GitHub Models catalog name)
+        anthropic      → claude-haiku-4-5-20251001  (primary — eval before upgrading to Sonnet)
+        github_models  → claude-haiku-4-5-20251001  (GitHub Models catalog name)
     """
-    override = os.environ.get("LLM_MODEL_OVERRIDE", "")
+    override = os.environ.get("LLM_MODEL_OVERRIDE", "") or os.environ.get("LLM_MODEL", "")
     if override:
         return override
 
     provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     if provider == "github_models":
-        return "claude-sonnet-4-6-20250219"
-    return "claude-sonnet-4-6"
+        return "claude-haiku-4-5-20251001"
+    return "claude-haiku-4-5-20251001"
+
+
+def _get_openai_fallback_client() -> Any:
+    """
+    Return an OpenAI AsyncClient for GPT-4o-mini fallback.
+    Requires OPENAI_API_KEY env var.
+    """
+    try:
+        import openai  # type: ignore[import]
+    except ImportError:
+        raise ImportError("openai package required for fallback. Run: pip install openai")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY env var required for GPT-4o-mini fallback")
+    return openai.AsyncOpenAI(api_key=api_key)
+
+
+def _get_fallback_model_name() -> str:
+    return os.environ.get("OPENAI_FALLBACK_MODEL", "gpt-4o-mini")
 
 
 # ── Provider-normalised call ──────────────────────────────────────────────────
@@ -245,6 +266,7 @@ async def run_agent(
     """
     client = _get_llm_client()
     model = _get_model_name()
+    fallback_enabled = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() != "false"
 
     # Build initial messages list: history + current inbound
     messages: list[dict] = list(conversation_history) + [
@@ -252,13 +274,48 @@ async def run_agent(
     ]
 
     for iteration in range(MAX_TOOL_ITERATIONS):
-        response = await _call_llm(
-            client=client,
-            model=model,
-            system=system_message,
-            messages=messages,
-            tools=tool_definitions,
-        )
+        try:
+            response = await _call_llm(
+                client=client,
+                model=model,
+                system=system_message,
+                messages=messages,
+                tools=tool_definitions,
+            )
+        except Exception as llm_err:
+            # Determine if this is an Anthropic primary error worth falling back from
+            provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
+            is_anthropic = provider == "anthropic"
+            is_retryable = (
+                "APIConnectionError" in type(llm_err).__name__
+                or "APIStatusError" in type(llm_err).__name__
+                or "TimeoutError" in type(llm_err).__name__
+            )
+            if is_anthropic and is_retryable and fallback_enabled:
+                logger.warning(
+                    f"Anthropic unavailable ({type(llm_err).__name__}) — "
+                    f"switching to GPT-4o-mini fallback for this request"
+                )
+                try:
+                    client = _get_openai_fallback_client()
+                    model = _get_fallback_model_name()
+                    # Retry same iteration with fallback provider
+                    os.environ["LLM_PROVIDER"] = "github_models"  # reuse OpenAI-compat path
+                    response = await _call_llm(
+                        client=client,
+                        model=model,
+                        system=system_message,
+                        messages=messages,
+                        tools=tool_definitions,
+                    )
+                except Exception as fallback_err:
+                    logger.error(f"GPT-4o-mini fallback also failed: {fallback_err}")
+                    return _FALLBACK_RESPONSE
+                finally:
+                    # Restore provider so next message retries Anthropic first
+                    os.environ["LLM_PROVIDER"] = "anthropic"
+            else:
+                raise
 
         # ── End turn — extract text and return ────────────────────────────────
         if response.stop_reason in ("end_turn", "stop_sequence"):
