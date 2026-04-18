@@ -186,6 +186,7 @@ async def handle_inbound_message(
                 current_message=message_text,
                 tool_definitions=TOOL_DEFINITIONS,
                 tool_dispatch=tool_dispatch,
+                client_id=client_id,
             )
         except Exception as e:
             logger.error(

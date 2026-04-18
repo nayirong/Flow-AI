@@ -247,6 +247,7 @@ async def run_agent(
     current_message: str,
     tool_definitions: list[dict],
     tool_dispatch: dict,
+    client_id: str = "",
 ) -> str:
     """
     Run the Claude tool-use loop and return the final text response.
@@ -255,17 +256,19 @@ async def run_agent(
         system_message:       Assembled system prompt from context_builder.
         conversation_history: Previous messages for this customer (oldest first).
         current_message:      The customer's current inbound message text.
-        tool_definitions:     Anthropic-format tool dicts. Empty list = no tools (Slice 4).
+        tool_definitions:     Anthropic-format tool dicts. Empty list = no tools.
         tool_dispatch:        Maps tool name → async callable. Empty dict = no tools.
+        client_id:            Client identifier for observability logging.
 
     Returns:
-        Final agent response text to send to the customer.
-
-    Raises:
-        Exception: LLM API errors propagate — caller (message_handler) handles them.
+        Final agent response text. Returns _FALLBACK_RESPONSE if both providers fail —
+        message_handler will send this to the customer as a technical error message.
     """
+    from engine.integrations.observability import log_incident, log_usage, extract_usage
+
     client = _get_llm_client()
     model = _get_model_name()
+    active_provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     fallback_enabled = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() != "false"
 
     # Build initial messages list: history + current inbound
@@ -282,24 +285,40 @@ async def run_agent(
                 messages=messages,
                 tools=tool_definitions,
             )
+            # Log token usage on every successful call
+            in_tok, out_tok = extract_usage(response, active_provider)
+            await log_usage(
+                provider=active_provider,
+                model=model,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                client_id=client_id,
+            )
         except Exception as llm_err:
-            # Determine if this is an Anthropic primary error worth falling back from
-            provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
-            is_anthropic = provider == "anthropic"
+            is_anthropic_primary = active_provider == "anthropic"
             is_retryable = (
                 "APIConnectionError" in type(llm_err).__name__
                 or "APIStatusError" in type(llm_err).__name__
                 or "TimeoutError" in type(llm_err).__name__
             )
-            if is_anthropic and is_retryable and fallback_enabled:
+
+            if is_anthropic_primary and is_retryable and fallback_enabled:
+                # Log Anthropic incident
+                await log_incident(
+                    provider="anthropic",
+                    error_type=type(llm_err).__name__,
+                    error_message=str(llm_err),
+                    client_id=client_id,
+                    fallback_used=True,
+                )
                 logger.warning(
-                    f"Anthropic unavailable ({type(llm_err).__name__}) — "
-                    f"switching to GPT-4o-mini fallback for this request"
+                    "Anthropic unavailable (%s) — switching to GPT-4o-mini for this request",
+                    type(llm_err).__name__,
                 )
                 try:
                     client = _get_openai_fallback_client()
                     model = _get_fallback_model_name()
-                    # Retry same iteration with fallback provider
+                    active_provider = "openai"
                     os.environ["LLM_PROVIDER"] = "github_models"  # reuse OpenAI-compat path
                     response = await _call_llm(
                         client=client,
@@ -308,13 +327,43 @@ async def run_agent(
                         messages=messages,
                         tools=tool_definitions,
                     )
+                    # Log usage for the fallback call
+                    in_tok, out_tok = extract_usage(response, "openai")
+                    await log_usage(
+                        provider="openai",
+                        model=model,
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                        client_id=client_id,
+                    )
                 except Exception as fallback_err:
-                    logger.error(f"GPT-4o-mini fallback also failed: {fallback_err}")
+                    # Both providers failed — log and return graceful error string
+                    await log_incident(
+                        provider="openai",
+                        error_type=type(fallback_err).__name__,
+                        error_message=str(fallback_err),
+                        client_id=client_id,
+                        fallback_used=False,
+                        both_failed=True,
+                    )
+                    logger.error(
+                        "Both Anthropic and OpenAI failed — client_id=%s anthropic=%s openai=%s",
+                        client_id, type(llm_err).__name__, type(fallback_err).__name__,
+                    )
                     return _FALLBACK_RESPONSE
                 finally:
-                    # Restore provider so next message retries Anthropic first
+                    # Always restore provider so next message retries Anthropic first
                     os.environ["LLM_PROVIDER"] = "anthropic"
+                    active_provider = "anthropic"
             else:
+                # Non-retryable error or fallback disabled — log and surface to caller
+                await log_incident(
+                    provider=active_provider,
+                    error_type=type(llm_err).__name__,
+                    error_message=str(llm_err),
+                    client_id=client_id,
+                    fallback_used=False,
+                )
                 raise
 
         # ── End turn — extract text and return ────────────────────────────────
