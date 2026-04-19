@@ -11,6 +11,59 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_BOOKING_FAILURE_ALERT_TEMPLATE = (
+    "⚠️ *Booking Backend Failure — Action Required*\n\n"
+    "A booking was confirmed with the customer but a backend error occurred.\n\n"
+    "Customer: {phone_number}\n"
+    "Name: {customer_name}\n"
+    "Service: {service_type} ({unit_count} units)\n"
+    "Date: {slot_date} ({slot_window})\n"
+    "Address: {address}, Singapore {postal_code}\n\n"
+    "Error: {error}\n\n"
+    "Please create the booking manually and confirm with the customer."
+)
+
+
+async def _alert_booking_failure(
+    client_config,
+    phone_number: str,
+    customer_name: str,
+    service_type: str,
+    unit_count: str,
+    address: str,
+    postal_code: str,
+    slot_date: str,
+    slot_window: str,
+    error: str,
+) -> None:
+    """Send a WhatsApp alert to the human agent when a booking backend failure occurs."""
+    if not client_config.human_agent_number:
+        logger.error("No human_agent_number configured — cannot send booking failure alert")
+        return
+    try:
+        from engine.integrations.meta_whatsapp import send_message
+        alert_text = _BOOKING_FAILURE_ALERT_TEMPLATE.format(
+            phone_number=phone_number,
+            customer_name=customer_name,
+            service_type=service_type,
+            unit_count=unit_count,
+            address=address,
+            postal_code=postal_code,
+            slot_date=slot_date,
+            slot_window=slot_window,
+            error=error,
+        )
+        await send_message(
+            client_config=client_config,
+            to_phone_number=client_config.human_agent_number,
+            text=alert_text,
+        )
+        logger.info(
+            f"Booking failure alert sent to human agent for customer {phone_number}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to send booking failure alert: {e}", exc_info=True)
+
 
 def _generate_booking_id(slot_date: str) -> str:
     """
@@ -75,11 +128,29 @@ async def write_booking(
     """
     booking_id = _generate_booking_id(slot_date)
 
-    # ── Step 1: Create Google Calendar event ─────────────────────────────────
-    calendar_event_id: Optional[str] = None
-    if client_config.google_calendar_creds and client_config.google_calendar_id:
-        from engine.integrations.google_calendar import create_booking_event
+    # ── Step 1: Create Google Calendar event (mandatory — no booking without it) ──
+    if not client_config.google_calendar_creds or not client_config.google_calendar_id:
+        error_msg = (
+            f"Google Calendar not configured for {client_config.client_id} "
+            "— cannot confirm booking without calendar event"
+        )
+        logger.error(error_msg)
+        await _alert_booking_failure(
+            client_config=client_config,
+            phone_number=phone_number,
+            customer_name=customer_name,
+            service_type=service_type,
+            unit_count=unit_count,
+            address=address,
+            postal_code=postal_code,
+            slot_date=slot_date,
+            slot_window=slot_window,
+            error="Google Calendar credentials not configured on this client.",
+        )
+        raise RuntimeError(error_msg)
 
+    from engine.integrations.google_calendar import create_booking_event
+    try:
         calendar_event_id = await create_booking_event(
             google_calendar_creds=client_config.google_calendar_creds,
             calendar_id=client_config.google_calendar_id,
@@ -95,13 +166,26 @@ async def write_booking(
             aircon_brand=aircon_brand,
             notes=notes,
         )
-    else:
-        logger.warning(
-            f"Google Calendar not configured for {client_config.client_id} "
-            "— skipping calendar event creation"
+    except Exception as calendar_err:
+        logger.error(
+            f"Calendar write failed for booking {booking_id} ({phone_number}): {calendar_err}",
+            exc_info=True,
         )
+        await _alert_booking_failure(
+            client_config=client_config,
+            phone_number=phone_number,
+            customer_name=customer_name,
+            service_type=service_type,
+            unit_count=unit_count,
+            address=address,
+            postal_code=postal_code,
+            slot_date=slot_date,
+            slot_window=slot_window,
+            error=str(calendar_err),
+        )
+        raise  # Re-raise so agent receives error and tells customer to wait for human
 
-    # ── Step 2: INSERT booking row ────────────────────────────────────────────
+    # ── Step 2: INSERT booking row (only reached after successful calendar write) ─
     booking_row: dict = {
         "booking_id": booking_id,
         "phone_number": phone_number,
@@ -118,7 +202,27 @@ async def write_booking(
     if notes:
         booking_row["notes"] = notes
 
-    await db.table("bookings").insert(booking_row).execute()
+    try:
+        await db.table("bookings").insert(booking_row).execute()
+    except Exception as db_err:
+        logger.error(
+            f"DB write failed for booking {booking_id} ({phone_number}) "
+            f"— calendar event {calendar_event_id} was already created: {db_err}",
+            exc_info=True,
+        )
+        await _alert_booking_failure(
+            client_config=client_config,
+            phone_number=phone_number,
+            customer_name=customer_name,
+            service_type=service_type,
+            unit_count=unit_count,
+            address=address,
+            postal_code=postal_code,
+            slot_date=slot_date,
+            slot_window=slot_window,
+            error=f"Calendar event created ({calendar_event_id}) but DB write failed: {db_err}",
+        )
+        raise
 
     # ── Step 3: Update customer record with name/address captured in this flow ─
     customer_update: dict = {

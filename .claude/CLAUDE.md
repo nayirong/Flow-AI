@@ -143,6 +143,7 @@ Product/docs/              ← platform-level PRDs and standards (rename to plat
 | Client onboarding process | `.flow/onboarding.md` |
 | Generating a client invoice | Run `/generate-invoice` skill; script at `finance/invoice_generator.py` |
 | Client invoice history | `clients/{client_id}/invoices/` |
+| Understanding which code file handles what | `docs/architecture/code_map.md` |
 
 ---
 
@@ -193,6 +194,7 @@ Nothing inside `engine/core/` imports from `clients/`. Dependency is one-directi
 - All Claude calls go through the context builder first. Never call Claude with a hardcoded system prompt.
 - Supabase is the only write target for business data. Google Sheets is read-only sync mirror if used at all.
 - n8n build docs (`clients/hey-aircon/plans/build/`) are preserved and untouched until Python migration is confirmed live in production.
+- Update `docs/architecture/code_map.md` after any change to engine file responsibilities, new files added, or architectural changes.
 
 ---
 

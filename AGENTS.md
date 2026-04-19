@@ -133,6 +133,14 @@ These are the bill-to fields for HeyAircon invoices. Pass these at call time whe
 
 ---
 
+## Agent-to-File Routing
+
+| Task | Read first |
+|------|-----------|
+| Understanding which code file handles what | `docs/architecture/code_map.md` |
+
+---
+
 ## Migration Gating Rules
 
 n8n docs in `clients/hey-aircon/plans/build/` are **preserved and untouched** until:

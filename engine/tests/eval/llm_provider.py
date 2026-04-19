@@ -24,7 +24,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 
 class LLMProviderAdapter:

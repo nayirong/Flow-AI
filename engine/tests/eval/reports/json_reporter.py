@@ -7,7 +7,7 @@ Schema:
   "timestamp": "2026-04-16T14:32:00Z",
   "git_commit": "abc123",
   "branch": "main",
-  "llm_model": "claude-sonnet-4-6",
+  "llm_model": "claude-haiku-4-5-20251001",
   "overall_pass_rate": 0.88,
   "dimension_scores": {
     "intent": 0.88,

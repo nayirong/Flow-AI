@@ -153,28 +153,32 @@ async def test_write_booking_inserts_row_and_updates_customer(mock_create_event)
 
 
 @pytest.mark.asyncio
-async def test_write_booking_no_calendar_skips_event():
-    """No calendar config → booking written without calendar_event_id."""
+async def test_write_booking_no_calendar_raises_and_alerts():
+    """No calendar config → raises RuntimeError and alerts human agent (never writes to DB)."""
     from engine.core.tools.booking_tools import write_booking
+    from unittest.mock import AsyncMock, patch
 
     db = _make_db()
     cfg = _make_client_config(has_calendar=False)
 
-    result = await write_booking(
-        db=db,
-        client_config=cfg,
-        phone_number="6591234567",
-        customer_name="Bob Lim",
-        service_type="Chemical Wash",
-        unit_count="1",
-        address="5 Tampines Ave",
-        postal_code="520005",
-        slot_date="2026-05-02",
-        slot_window="PM",
-    )
+    with patch("engine.core.tools.booking_tools._alert_booking_failure", new_callable=AsyncMock) as mock_alert:
+        with pytest.raises(RuntimeError, match="Google Calendar not configured"):
+            await write_booking(
+                db=db,
+                client_config=cfg,
+                phone_number="6591234567",
+                customer_name="Bob Lim",
+                service_type="Chemical Wash",
+                unit_count="1",
+                address="5 Tampines Ave",
+                postal_code="520005",
+                slot_date="2026-05-02",
+                slot_window="PM",
+            )
 
-    assert result["status"] == "Confirmed"
-    assert result["calendar_event_id"] is None
+    mock_alert.assert_called_once()
+    # DB must NOT have been touched
+    db.table.assert_not_called()
 
 
 def test_generate_booking_id_format():
