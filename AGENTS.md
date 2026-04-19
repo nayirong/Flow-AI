@@ -1,7 +1,7 @@
 # AGENTS.md — Flow AI Master Agent Index
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-18
+> Last Updated: 2026-04-19
 
 ---
 
@@ -18,7 +18,7 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 | chief-of-staff | `docs/status_log.md`, `AGENTS.md` | This file; `/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/docs/status_log.md` |
 | product-manager | `docs/requirements/` | Not yet created — see gap audit |
 | ux-ui-designer | `docs/ux-ui-spec/` | Not yet created |
-| software-architect | `docs/architecture/` | Not yet created — current architecture lives at `clients/hey-aircon/plans/build/00_architecture_reference.md` |
+| software-architect | `docs/architecture/` | `docs/architecture/00_platform_architecture.md` (platform engine architecture, live); `docs/architecture/code_map.md` (cold-start file index, all 15 engine files, Supabase data flow, where-to-look table) |
 | sdet-engineer | `docs/test-plan/`, worktrees | Not yet created |
 | business-strategist | `docs/business-plan.md`, `docs/pitch-deck.md` | `Product/docs/business-plan.md` exists (partial) |
 | growth-marketer | `docs/messaging-playbook.md`, etc. | Not yet created |
@@ -144,8 +144,10 @@ These are the bill-to fields for HeyAircon invoices. Pass these at call time whe
 ## Migration Gating Rules
 
 n8n docs in `clients/hey-aircon/plans/build/` are **preserved and untouched** until:
-1. Python engine is verified in production (real WhatsApp, real Meta webhook)
-2. Meta webhook cutover is confirmed
-3. Explicit approval given to archive n8n docs
+1. Python engine is verified in production (real WhatsApp, real Meta webhook) — **PASSED** as of 2026-04-19
+2. Meta webhook cutover is confirmed — **PASSED** as of 2026-04-19
+3. 48h production verification window cleared — **In Progress** (started 2026-04-19)
+4. Google Calendar integration confirmed working (GCP Calendar API enabled + events appearing) — **Blocked**
+5. Explicit approval given to archive n8n docs — **Pending**
 
-Do not archive, rename, or modify `clients/hey-aircon/plans/build/` until all three gates are passed.
+Do not archive, rename, or modify `clients/hey-aircon/plans/build/` until all five gates are passed.

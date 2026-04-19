@@ -67,6 +67,7 @@ Locked decisions from `CLAUDE.md`. Do not deviate.
 | Web framework | FastAPI (Python, async) | All routes are async |
 | LLM (primary) | Anthropic SDK — `claude-haiku-4-5-20251001` | Direct SDK, no LangChain |
 | LLM (fallback) | OpenAI SDK — `gpt-4o-mini` | Activated per-request when Anthropic API is unreachable (timeout, 5xx, rate limit); transparent to customer |
+| LLM (eval shim) | GitHub Models API — OpenAI-compatible endpoint at `https://models.inference.ai.azure.com/v1` | `LLM_PROVIDER=github_models`; uses `GITHUB_TOKEN`; covered by GitHub Copilot subscription — no Anthropic billing for local eval runs |
 | Database client | `supabase-py` | Async client for all Supabase reads/writes |
 | HTTP client | `httpx` | Async — Meta Cloud API calls |
 | Config/env | `pydantic-settings` | Typed env var loading via `Settings` model |
@@ -316,8 +317,10 @@ async def run_agent(
     conversation_history: list[dict],
     current_message: str,
     tool_definitions: list[dict],
-    tool_dispatch: dict[str, Callable],
-    client_config: ClientConfig,
+    tool_dispatch: dict,
+    client_id: str = "",
+    anthropic_api_key: str = "",
+    openai_api_key: str = "",
 ) -> str:
     ...
 ```
@@ -816,6 +819,9 @@ Add as a new Railway service in the existing HeyAircon Railway project. n8n and 
 |---------|-------|-------|
 | `SHARED_SUPABASE_URL` | Flow AI shared Supabase URL | For `clients` table lookups |
 | `SHARED_SUPABASE_SERVICE_KEY` | Flow AI shared Supabase service key | |
+| `LLM_PROVIDER` | `anthropic` (default) or `github_models` | Selects provider shim in `agent_runner.py`; Railway production must be `anthropic` or unset |
+| `GITHUB_TOKEN` | GitHub personal access token | Required only when `LLM_PROVIDER=github_models`; covered by Copilot subscription; local eval use only |
+| `LLM_MODEL` | e.g. `claude-haiku-4-5-20251001` | Overrides default model for the active provider; used to upgrade to Sonnet without code change |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key | Observability (planned) |
 | `LANGFUSE_SECRET_KEY` | Langfuse secret key | Observability (planned) |
 

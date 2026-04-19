@@ -21,7 +21,7 @@
 | Supabase (shared flowai-platform) | Live | Tables created: `api_incidents`, `api_usage`, `clients`. HeyAircon row inserted with Meta phone ID, verify token, human agent number, Google Calendar ID. |
 | Meta webhook | Live | Webhook URL registered and verified with Meta. Real WhatsApp traffic being processed. |
 | Python orchestration engine | Live in Production | End-to-end flow confirmed: inbound logged → escalation gate → context builder → Claude Haiku 4.5 → reply via Meta API. |
-| Google Calendar integration | Blocked | `write_booking` fails with 404 — service account not yet granted access to `agent.heyaircon@gmail.com` calendar. Fix identified; awaiting user action. |
+| Google Calendar integration | Blocked | Suspected Google Calendar API not enabled in GCP project `agent-heyaircon`. Service account has been shared but events not appearing. User needs to enable Calendar API in GCP Console for project `agent-heyaircon`. |
 | hey-aircon website | Built | Static HTML site at clients/hey-aircon/website/ |
 | AGENTS.md | Current | Last updated 2026-04-18 |
 | .claude/CLAUDE.md | Current | Last updated 2026-04-19 |
@@ -41,7 +41,7 @@
 | E: Escalate-to-human tool | Not Started | Awaiting Google Calendar fix and 48h production verification |
 | Supabase (shared platform) | Complete | Tables provisioned; HeyAircon row live |
 | Meta dev account | Complete | Webhook verified, real traffic flowing as of 2026-04-19 |
-| Google Calendar fix | Pending User Action | Share calendar `agent.heyaircon@gmail.com` with service account `client_email` from `HEY_AIRCON_GOOGLE_CALENDAR_CREDS` |
+| Google Calendar fix | Pending User Action | Enable Google Calendar API in GCP Console for project `agent-heyaircon`. Service account already shared — API enablement is the suspected missing step. |
 | Per-client LLM keys | Complete | `ClientConfig` carries `anthropic_api_key` and `openai_api_key` from Railway env vars. Shared platform `ANTHROPIC_API_KEY` removed. |
 | Go-live / 48h verification | In Progress | Engine live as of 2026-04-19; monitoring for 48h before n8n decommission decision |
 
@@ -52,7 +52,7 @@
 | n8n → Python orchestration engine | Live in Production | Real WhatsApp traffic processed 2026-04-19 |
 | docs/ folder structure | Complete | Established earlier in project lifecycle |
 | .claude/CLAUDE.md | Current | Blockers and migration status updated 2026-04-19 |
-| Architecture doc (`00_platform_architecture.md`) | Stale — Update In Progress | Delegated to `@software-architect` 2026-04-19 — model names, `ClientConfig` fields, Railway env vars table, deployment phase, migration checklist all need updating |
+| Architecture doc (`00_platform_architecture.md`) | Stale — Needs Update | Two drifts identified: (1) `run_agent()` signature in doc uses `client_config: ClientConfig` but implementation uses explicit `anthropic_api_key` + `openai_api_key` + `client_id` params; (2) `LLM_PROVIDER=github_models` eval shim not documented. Delegated to `@software-architect`. |
 | n8n decommission | Pending | Awaiting 48h production verification + Google Calendar fix confirmation |
 
 ---
@@ -85,8 +85,9 @@
 
 | Date | Event |
 |------|-------|
-| 2026-04-19 | Code map created: `docs/architecture/code_map.md` — living quick-reference mapping every `engine/` file to its role in the end-to-end message flow, Supabase data flow, and "where to look" developer routing table. Delegated to `@software-architect`. `AGENTS.md` and `.claude/CLAUDE.md` updated with routing entry and hard rule to keep code map current. |
-| 2026-04-19 | Python engine confirmed live in production. Meta webhook verified and receiving real WhatsApp traffic for HeyAircon. Per-client LLM keys (`{CLIENT_ID_UPPER}_ANTHROPIC_API_KEY`, `{CLIENT_ID_UPPER}_OPENAI_API_KEY`) implemented in `ClientConfig`; shared `ANTHROPIC_API_KEY` removed from `Settings`. Shared Supabase (`flowai-platform`) fully provisioned with `api_incidents`, `api_usage`, `clients` tables; HeyAircon row live. Google Calendar 404 bug identified — service account not granted calendar access; fix pending user action. `status_log.md` and `.claude/CLAUDE.md` updated. Architecture doc (`docs/architecture/00_platform_architecture.md`) update delegated to `@software-architect`. |
+| 2026-04-19 | Post-session doc review completed. Architecture doc drifts identified: `run_agent()` signature (doc uses `client_config: ClientConfig`; impl uses explicit key params) and `LLM_PROVIDER=github_models` eval shim not documented. Delegated to `@software-architect` for targeted update. `booking_tools.py` hardening confirmed: `write_booking()` now raises `RuntimeError` on missing Calendar creds; atomicity enforced (no DB write without calendar event); human agent alerted on failure. `context_builder.py` prompt fix confirmed: 7 explicit BOOKING RULES replacing vague confirmation block. Google Calendar blocker re-classified: suspected GCP API not enabled (not just service account sharing). |
+| 2026-04-19 | Code map created: `docs/architecture/code_map.md` — living quick-reference mapping every `engine/` file to its role in the end-to-end message flow, Supabase data flow, and "where to look" developer routing table. `AGENTS.md` and `.claude/CLAUDE.md` updated with routing entry and hard rule to keep code map current. |
+| 2026-04-19 | Python engine confirmed live in production. Meta webhook verified and receiving real WhatsApp traffic for HeyAircon. Per-client LLM keys (`{CLIENT_ID_UPPER}_ANTHROPIC_API_KEY`, `{CLIENT_ID_UPPER}_OPENAI_API_KEY`) implemented in `ClientConfig`; shared `ANTHROPIC_API_KEY` removed from `Settings`. Shared Supabase (`flowai-platform`) fully provisioned with `api_incidents`, `api_usage`, `clients` tables; HeyAircon row live. `status_log.md` and `.claude/CLAUDE.md` updated. |
 | 2026-04-18 | HeyAircon billing details recorded: `AGENTS.md` Finance Agent section updated with HeyAircon bill-to fields (contact +65 8841 9968, address TBD, payment terms). Both existing invoices (INV-HA-20260401, INV-HA-20260402) regenerated with updated client contact via `finance/invoice_generator.py` — output to `clients/hey-aircon/invoices/`. |
 | 2026-04-18 | Finance agent initiative: `AGENTS.md` updated with `finance-agent` entry. `finance/invoice_generator.py`, `generate-invoice` skill, and `.claude/CLAUDE.md` updates pending — routed to `@sdet-engineer`. PDF proposal unreadable in this environment (poppler not installed) — billing field extraction blocked until PDF is accessible or fields are provided manually. |
 | 2026-04-16 | Evaluation pipeline initiative approved. Plan saved to `docs/planning/eval_pipeline_plan.md`. `@product-manager` dispatched to produce `docs/requirements/eval_pipeline.md`. |
