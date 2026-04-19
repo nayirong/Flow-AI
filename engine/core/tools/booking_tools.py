@@ -266,30 +266,40 @@ async def write_booking(
 async def get_customer_bookings(
     db,
     phone_number: str,
+    filter: str = "all",
 ) -> dict:
     """
-    Retrieve the customer's 5 most recent bookings from Supabase.
-
-    Used when a customer asks about their existing appointments or wants to reschedule.
+    Retrieve the customer's bookings from Supabase.
 
     Args:
         db:           Supabase async client (injected).
         phone_number: Customer phone number (injected).
+        filter:       "upcoming" (slot_date >= today), "past" (slot_date < today),
+                      or "all" (no date filter). Defaults to "all".
 
     Returns:
-        dict: {phone_number, bookings (list), count}
+        dict: {phone_number, filter, bookings (list), count}
 
     Never raises — on DB error returns empty bookings list.
     """
+    from datetime import date
+    today = date.today().isoformat()
+
     try:
-        result = await (
+        query = (
             db.table("bookings")
             .select("booking_id, service_type, slot_date, slot_window, booking_status")
             .eq("phone_number", phone_number)
-            .order("created_at", desc=True)
-            .limit(5)
-            .execute()
         )
+
+        if filter == "upcoming":
+            query = query.gte("slot_date", today).order("slot_date", desc=False)
+        elif filter == "past":
+            query = query.lt("slot_date", today).order("slot_date", desc=True)
+        else:
+            query = query.order("slot_date", desc=False)
+
+        result = await query.limit(5).execute()
         bookings = result.data or []
     except Exception as e:
         logger.error(
@@ -299,6 +309,7 @@ async def get_customer_bookings(
 
     return {
         "phone_number": phone_number,
+        "filter": filter,
         "bookings": bookings,
         "count": len(bookings),
     }

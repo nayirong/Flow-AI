@@ -103,14 +103,28 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "get_customer_bookings",
         "description": (
-            "Retrieve the customer's 5 most recent bookings. Use this when a customer "
-            "asks about their existing appointments, wants to check booking status, "
-            "or is requesting a reschedule or cancellation. Returns booking ID, service "
-            "type, date, time window, and status for each booking."
+            "Retrieve the customer's bookings. Use this when a customer asks about their "
+            "appointments, booking status, or wants to reschedule or cancel. "
+            "Set 'filter' based on what the customer is asking: "
+            "'upcoming' for future appointments (today onwards), "
+            "'past' for previous appointments, "
+            "'all' when unspecified or ambiguous. "
+            "Returns booking ID, service type, date, time window, and status."
         ),
         "input_schema": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "filter": {
+                    "type": "string",
+                    "enum": ["upcoming", "past", "all"],
+                    "description": (
+                        "Which bookings to retrieve. "
+                        "'upcoming' = today and future dates (use when customer asks about next appointment, upcoming bookings). "
+                        "'past' = dates before today (use when customer asks about previous or past bookings). "
+                        "'all' = no date filter (use when customer asks generally about their bookings without specifying past or future)."
+                    ),
+                },
+            },
             "required": [],
         },
     },

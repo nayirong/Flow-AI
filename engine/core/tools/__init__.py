@@ -70,8 +70,8 @@ def build_tool_dispatch(db, client_config, phone_number: str) -> dict:
             notes=notes,
         )
 
-    async def _get_customer_bookings() -> dict:
-        return await get_customer_bookings(db=db, phone_number=phone_number)
+    async def _get_customer_bookings(filter: str = "all") -> dict:
+        return await get_customer_bookings(db=db, phone_number=phone_number, filter=filter)
 
     async def _escalate_to_human(reason: str) -> dict:
         return await escalate_to_human(
