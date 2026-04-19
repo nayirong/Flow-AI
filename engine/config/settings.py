@@ -20,10 +20,7 @@ class Settings(BaseSettings):
     # Shared Flow AI Supabase (has clients table)
     shared_supabase_url: str
     shared_supabase_service_key: str
-    
-    # Anthropic API key for Claude
-    anthropic_api_key: str
-    
+
     # Logging
     log_level: str = "INFO"
     

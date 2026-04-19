@@ -29,6 +29,8 @@ async def test_load_client_config_success(mock_env_vars, mock_supabase_client, c
     assert config.meta_whatsapp_token == "hey_meta_token_mock"
     assert config.supabase_url == "https://heyaircon.supabase.co"
     assert config.supabase_service_key == "hey_service_key_mock"
+    assert config.anthropic_api_key == "sk-ant-test-key"
+    assert config.openai_api_key == "sk-openai-test-key"
     assert isinstance(config.google_calendar_creds, dict)
 
 

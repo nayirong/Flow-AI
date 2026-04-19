@@ -187,6 +187,8 @@ async def handle_inbound_message(
                 tool_definitions=TOOL_DEFINITIONS,
                 tool_dispatch=tool_dispatch,
                 client_id=client_id,
+                anthropic_api_key=client_config.anthropic_api_key,
+                openai_api_key=client_config.openai_api_key,
             )
         except Exception as e:
             logger.error(

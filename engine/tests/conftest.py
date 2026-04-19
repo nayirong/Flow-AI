@@ -12,12 +12,13 @@ def mock_env_vars(monkeypatch):
     env_vars = {
         "SHARED_SUPABASE_URL": "https://shared.supabase.co",
         "SHARED_SUPABASE_SERVICE_KEY": "shared_service_key_mock",
-        "ANTHROPIC_API_KEY": "sk-ant-test-key",
         "LOG_LEVEL": "INFO",
-        # HeyAircon client secrets
+        # HeyAircon client secrets (LLM keys are per-client)
         "HEY_AIRCON_META_WHATSAPP_TOKEN": "hey_meta_token_mock",
         "HEY_AIRCON_SUPABASE_URL": "https://heyaircon.supabase.co",
         "HEY_AIRCON_SUPABASE_SERVICE_KEY": "hey_service_key_mock",
+        "HEY_AIRCON_ANTHROPIC_API_KEY": "sk-ant-test-key",
+        "HEY_AIRCON_OPENAI_API_KEY": "sk-openai-test-key",
         "HEY_AIRCON_GOOGLE_CALENDAR_CREDS": '{"type": "service_account", "project_id": "test"}',
     }
     for key, value in env_vars.items():
@@ -124,4 +125,6 @@ def mock_client_config_obj():
     config.meta_verify_token = "heyaircon_webhook_2026"
     config.meta_phone_number_id = "123456789"
     config.meta_whatsapp_token = "test_token"
+    config.anthropic_api_key = "sk-ant-test-key"
+    config.openai_api_key = "sk-openai-test-key"
     return config

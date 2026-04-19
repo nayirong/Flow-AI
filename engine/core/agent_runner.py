@@ -38,12 +38,12 @@ _FALLBACK_RESPONSE = (
 
 # ── Provider shim ─────────────────────────────────────────────────────────────
 
-def _get_llm_client() -> Any:
+def _get_llm_client(anthropic_api_key: str = "") -> Any:
     """
     Return the appropriate LLM client based on LLM_PROVIDER env var.
 
     LLM_PROVIDER=anthropic (default):
-        Returns anthropic.AsyncAnthropic — uses ANTHROPIC_API_KEY.
+        Returns anthropic.AsyncAnthropic — uses per-client anthropic_api_key.
 
     LLM_PROVIDER=github_models:
         Returns openai.AsyncOpenAI pointed at GitHub Models inference endpoint.
@@ -71,7 +71,7 @@ def _get_llm_client() -> Any:
             base_url="https://models.inference.ai.azure.com/v1",
         )
 
-    # Default: Anthropic SDK
+    # Default: Anthropic SDK — use per-client key
     try:
         import anthropic  # type: ignore[import]
     except ImportError:
@@ -79,7 +79,7 @@ def _get_llm_client() -> Any:
             "anthropic package required. Run: pip install anthropic"
         )
     logger.info("Using Anthropic provider")
-    return anthropic.AsyncAnthropic()
+    return anthropic.AsyncAnthropic(api_key=anthropic_api_key or None)
 
 
 def _get_model_name() -> str:
@@ -101,18 +101,18 @@ def _get_model_name() -> str:
     return "claude-haiku-4-5-20251001"
 
 
-def _get_openai_fallback_client() -> Any:
+def _get_openai_fallback_client(openai_api_key: str = "") -> Any:
     """
     Return an OpenAI AsyncClient for GPT-4o-mini fallback.
-    Requires OPENAI_API_KEY env var.
+    Uses per-client openai_api_key from ClientConfig.
     """
     try:
         import openai  # type: ignore[import]
     except ImportError:
         raise ImportError("openai package required for fallback. Run: pip install openai")
-    api_key = os.environ.get("OPENAI_API_KEY", "")
+    api_key = openai_api_key or os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY env var required for GPT-4o-mini fallback")
+        raise ValueError("No OpenAI API key available for GPT-4o-mini fallback")
     return openai.AsyncOpenAI(api_key=api_key)
 
 
@@ -248,6 +248,8 @@ async def run_agent(
     tool_definitions: list[dict],
     tool_dispatch: dict,
     client_id: str = "",
+    anthropic_api_key: str = "",
+    openai_api_key: str = "",
 ) -> str:
     """
     Run the Claude tool-use loop and return the final text response.
@@ -259,6 +261,8 @@ async def run_agent(
         tool_definitions:     Anthropic-format tool dicts. Empty list = no tools.
         tool_dispatch:        Maps tool name → async callable. Empty dict = no tools.
         client_id:            Client identifier for observability logging.
+        anthropic_api_key:    Per-client Anthropic API key.
+        openai_api_key:       Per-client OpenAI API key (fallback).
 
     Returns:
         Final agent response text. Returns _FALLBACK_RESPONSE if both providers fail —
@@ -266,7 +270,7 @@ async def run_agent(
     """
     from engine.integrations.observability import log_incident, log_usage, extract_usage
 
-    client = _get_llm_client()
+    client = _get_llm_client(anthropic_api_key=anthropic_api_key)
     model = _get_model_name()
     active_provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     fallback_enabled = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() != "false"
@@ -316,7 +320,7 @@ async def run_agent(
                     type(llm_err).__name__,
                 )
                 try:
-                    client = _get_openai_fallback_client()
+                    client = _get_openai_fallback_client(openai_api_key=openai_api_key)
                     model = _get_fallback_model_name()
                     active_provider = "openai"
                     os.environ["LLM_PROVIDER"] = "github_models"  # reuse OpenAI-compat path

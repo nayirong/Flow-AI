@@ -1,9 +1,9 @@
 # Flow AI — Python Orchestration Engine Architecture
 ## Platform Architecture Reference | Flow AI
 
-**Last Updated:** April 2026
-**Status:** Architecture design — pending implementation
-**Replaces:** `clients/hey-aircon/plans/build/00_architecture_reference.md` (n8n reference — preserved until migration confirmed)
+**Last Updated:** 2026-04-19
+**Status:** Live in production — Python engine receiving real WhatsApp traffic for HeyAircon
+**Replaces:** `clients/hey-aircon/plans/build/00_architecture_reference.md` (n8n reference — preserved until decommission confirmed)
 
 ---
 
@@ -21,7 +21,7 @@ The engine is **client-agnostic**. All client-specific behaviour is loaded at ru
 |-------|--------------|----------------------|
 | Webhook receiver | n8n primary service on Railway | FastAPI service `flow-engine` on Railway |
 | Message execution | n8n worker service on Railway | FastAPI `BackgroundTasks` (same pattern) |
-| LLM | GPT-4o-mini via OpenAI | Claude claude-sonnet-4-6 via Anthropic SDK direct |
+| LLM | GPT-4o-mini via OpenAI | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) primary; GPT-4o-mini (OpenAI SDK) silent fallback per-request when Anthropic API unreachable |
 | Supabase reads/writes | n8n Postgres credential nodes | `supabase-py` async client |
 | Meta API | n8n HTTP Request node | `httpx` async HTTP client |
 | Google Calendar | n8n HTTP Request node (Week 3) | Google API Python client |
@@ -65,7 +65,8 @@ Locked decisions from `CLAUDE.md`. Do not deviate.
 | Layer | Technology | Notes |
 |-------|-----------|-------|
 | Web framework | FastAPI (Python, async) | All routes are async |
-| LLM | Anthropic SDK — `claude-sonnet-4-6` | Direct SDK, no LangChain |
+| LLM (primary) | Anthropic SDK — `claude-haiku-4-5-20251001` | Direct SDK, no LangChain |
+| LLM (fallback) | OpenAI SDK — `gpt-4o-mini` | Activated per-request when Anthropic API is unreachable (timeout, 5xx, rate limit); transparent to customer |
 | Database client | `supabase-py` | Async client for all Supabase reads/writes |
 | HTTP client | `httpx` | Async — Meta Cloud API calls |
 | Config/env | `pydantic-settings` | Typed env var loading via `Settings` model |
@@ -323,7 +324,7 @@ async def run_agent(
 
 1. Build `messages` list: `conversation_history` + `[{"role": "user", "content": current_message}]`
 2. Call `anthropic_client.messages.create()`:
-   - `model`: `claude-sonnet-4-6`
+   - `model`: `claude-haiku-4-5-20251001` (primary; falls back to `gpt-4o-mini` via OpenAI SDK on Anthropic API failure)
    - `system`: `system_message`
    - `messages`: built above
    - `tools`: `tool_definitions`
@@ -614,7 +615,7 @@ CREATE TABLE clients (
 );
 ```
 
-**Fields NOT stored here:** `meta_whatsapp_token`, `supabase_url`, `supabase_service_key` — these are high-sensitivity secrets that live in Railway env vars only.
+**Fields NOT stored here:** `meta_whatsapp_token`, `supabase_url`, `supabase_service_key`, `anthropic_api_key`, `openai_api_key` — these are high-sensitivity secrets that live in Railway env vars only. LLM keys are per-client so each client is billed on their own Anthropic and OpenAI accounts.
 
 #### Railway env vars (per client, on `flow-engine` service)
 
@@ -642,6 +643,8 @@ class ClientConfig(BaseModel):
     google_calendar_creds: dict     # service account JSON loaded from env/file
     supabase_url: str               # from env var
     supabase_service_key: str       # from env var
+    anthropic_api_key: str          # from {CLIENT_ID_UPPER}_ANTHROPIC_API_KEY — per-client LLM billing
+    openai_api_key: str             # from {CLIENT_ID_UPPER}_OPENAI_API_KEY — per-client fallback billing
     timezone: str
     is_active: bool
 ```
@@ -807,16 +810,26 @@ Add as a new Railway service in the existing HeyAircon Railway project. n8n and 
 
 ### Required env vars on `flow-engine` service
 
+**Shared platform vars (all clients):**
+
 | Env var | Value | Notes |
 |---------|-------|-------|
 | `SHARED_SUPABASE_URL` | Flow AI shared Supabase URL | For `clients` table lookups |
 | `SHARED_SUPABASE_SERVICE_KEY` | Flow AI shared Supabase service key | |
-| `HEY_AIRCON_META_WHATSAPP_TOKEN` | Meta Bearer token | Per-client pattern |
-| `HEY_AIRCON_SUPABASE_URL` | HeyAircon Supabase project URL | Per-client pattern |
-| `HEY_AIRCON_SUPABASE_SERVICE_KEY` | HeyAircon Supabase service key | Per-client pattern |
-| `ANTHROPIC_API_KEY` | Anthropic API key | Shared across all clients |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key | Observability (planned) |
 | `LANGFUSE_SECRET_KEY` | Langfuse secret key | Observability (planned) |
+
+**Per-client vars (5 vars per client, `{CLIENT_ID_UPPER}_` prefix):**
+
+| Env var pattern | Example for hey-aircon | Notes |
+|---------|----------------------|-------|
+| `{CLIENT_ID_UPPER}_META_WHATSAPP_TOKEN` | `HEY_AIRCON_META_WHATSAPP_TOKEN` | Bearer token for Meta API |
+| `{CLIENT_ID_UPPER}_SUPABASE_URL` | `HEY_AIRCON_SUPABASE_URL` | Client's Supabase project URL |
+| `{CLIENT_ID_UPPER}_SUPABASE_SERVICE_KEY` | `HEY_AIRCON_SUPABASE_SERVICE_KEY` | Client's Supabase service role key |
+| `{CLIENT_ID_UPPER}_ANTHROPIC_API_KEY` | `HEY_AIRCON_ANTHROPIC_API_KEY` | Client's Anthropic API key — per-client billing |
+| `{CLIENT_ID_UPPER}_OPENAI_API_KEY` | `HEY_AIRCON_OPENAI_API_KEY` | Client's OpenAI API key — per-client fallback billing |
+
+Adding a new client requires these 5 per-client env vars plus an INSERT into the shared `clients` table. No engine changes. No redeploy for non-secret config updates.
 
 ### Health check
 
@@ -826,33 +839,17 @@ Returns `{"status": "ok"}` with HTTP 200.
 
 Configure Railway health check path to `/health`.
 
-### Parallel running strategy
+### Deployment status (as of 2026-04-19)
+
+The `flow-engine` service is live in production on Railway. Meta webhook is pointed at:
 
 ```
-Phase 1 — Add Python engine (no traffic change):
-  n8n primary       → still receives all Meta webhooks
-  n8n-worker        → still executes all workflows
-  flow-engine       → deployed and /health passing; no traffic yet
-
-Phase 2 — Parallel test (internal only):
-  Meta webhook URL stays pointed at n8n
-  Send test messages via curl directly to flow-engine webhook URL
-  Verify identical responses vs n8n
-
-Phase 3 — Traffic cutover:
-  Update Meta Developer Portal webhook URL → flow-engine Railway URL
-  Monitor interactions_log for correct inbound + outbound logging
-  Run scripted E2E test (see Section 9)
-
-Phase 4 — Verification (48h minimum):
-  Both n8n and flow-engine running
-  Confirm: bookings created, escalation flags set, calendar events created
-  No errors in Railway flow-engine logs
-
-Phase 5 — n8n decommission (3 gates required — see Section 12):
-  Stop n8n and n8n-worker services
-  Archive n8n workflow JSON exports
+https://flow-ai-production-9296.up.railway.app/webhook/whatsapp/hey-aircon
 ```
+
+Railway deployment uses Option A: one Railway project per client, single monorepo. All Railway projects track the `release` branch. Promote to release with `git push origin main:release`.
+
+n8n (`n8n` + `n8n-worker` services) is still running but decommission is pending completion of the 48h verification window and resolution of the Google Calendar service account access issue. n8n is not receiving Meta webhooks — the webhook URL is pointed at `flow-engine`.
 
 ---
 
@@ -915,7 +912,7 @@ Run after traffic cutover to flow-engine. Test with a real WhatsApp test number.
 | Hybrid config: `clients` table + Railway env vars | Secrets (`meta_whatsapp_token`, `supabase_service_key`) must not be in a database row readable by any DB credential. Non-secrets (`meta_phone_number_id`, `human_agent_number`) can be in DB for easy update without redeploy. Migration path to a secrets manager is clear at 10–20 clients. | Apr 2026 |
 | `clients` table does not store `supabase_service_key` | A service key in a database row creates a circular trust problem — the key used to read the DB is stored in the DB. If the shared Supabase project is compromised, all client databases are exposed. Service keys stay in Railway env vars where they are isolated per-service. | Apr 2026 |
 | Escalation gate is hard programmatic, not agent-decided | LLM cannot be trusted to gate its own responses. If the agent decides whether it is escalated, a jailbreak or edge case can bypass the gate. The programmatic check is deterministic and always runs before the agent sees the message. | Apr 2026 |
-| Claude claude-sonnet-4-6 replaces GPT-4o-mini | Claude claude-sonnet-4-6 has stronger tool use and instruction following. Anthropic SDK gives direct control over the tool-use loop. Consistent with platform direction. | Apr 2026 |
+| Claude Haiku 4.5 as primary LLM; GPT-4o-mini as silent fallback | Haiku 4.5 provides lower cost per conversation and fast response times for structured booking flows. GPT-4o-mini fallback activates per-request when Anthropic API is unreachable — transparent to the customer. Each client is billed separately on their own Anthropic and OpenAI accounts. Model is controlled by `LLM_MODEL` env var — no code change needed to upgrade to Sonnet. | Apr 2026 |
 | Add-only calendar writes | Phase 1 scope. All reschedule/cancellation requests go through human escalation. Prevents accidental data loss from agent errors. | Apr 2026 |
 | 5-minute TTL cache for `clients` table | Shared DB cannot be a per-request dependency — a shared DB blip must not take down all clients. 5 minutes is short enough that config changes (e.g. adding a new client) propagate quickly while protecting against transient failures. | Apr 2026 |
 
@@ -931,7 +928,7 @@ Run after traffic cutover to flow-engine. Test with a real WhatsApp test number.
 | Config fetch | `Fetch Config` Postgres node | `build_system_message()` Supabase SELECT |
 | Policy fetch | `Fetch Policies` Postgres node | `build_system_message()` Supabase SELECT |
 | Context assembly | `Build Context` Code node (JavaScript) | `build_system_message()` Python function |
-| LLM | GPT-4o-mini via OpenAI | Claude claude-sonnet-4-6 via Anthropic SDK |
+| LLM | GPT-4o-mini via OpenAI | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) via Anthropic SDK — primary; GPT-4o-mini (OpenAI SDK) silent fallback per-request |
 | Conversation memory | Postgres Chat Memory sub-node (Railway Postgres) | `fetch_conversation_history()` from `interactions_log` |
 | Tool dispatch | Execute Sub-Workflow trigger | `tool_dispatch` dict of async functions in `agent_runner.py` |
 | Booking write | `Tool - Write Booking` sub-workflow | `write_booking()` Supabase INSERT + UPSERT |
@@ -956,11 +953,11 @@ Run these steps in order. Do not proceed past a gate until its criteria are met.
 
 ### Pre-migration
 
-- [ ] Python engine deployed to Railway as `flow-engine` service
-- [ ] `GET /health` returns `200 OK`
-- [ ] All Railway env vars set on `flow-engine` (see Section 8)
-- [ ] `clients` table populated with HeyAircon row in shared Supabase
-- [ ] Unit tests passing: `pytest engine/tests/unit/`
+- [x] Python engine deployed to Railway as `flow-engine` service
+- [x] `GET /health` returns `200 OK`
+- [x] All Railway env vars set on `flow-engine` (see Section 8)
+- [x] `clients` table populated with HeyAircon row in shared Supabase
+- [x] Unit tests passing: `pytest engine/tests/unit/`
 
 ### Parallel test (no traffic change)
 
@@ -979,9 +976,9 @@ Criteria: All parallel test cases pass with no errors in Railway `flow-engine` l
 
 ### Traffic cutover
 
-- [ ] Update Meta Developer Portal webhook URL to `flow-engine` Railway URL: `https://<flow-engine-url>/webhook/whatsapp/hey-aircon`
-- [ ] Verify Meta GET verification handshake completes (check Railway logs for 200 on GET)
-- [ ] Send a real WhatsApp test message and confirm response
+- [x] Update Meta Developer Portal webhook URL to `flow-engine` Railway URL: `https://flow-ai-production-9296.up.railway.app/webhook/whatsapp/hey-aircon`
+- [x] Verify Meta GET verification handshake completes (check Railway logs for 200 on GET)
+- [x] Send a real WhatsApp test message and confirm response
 
 ### **GATE 2:** Live traffic verified
 Criteria: At least 5 real WhatsApp messages processed end-to-end through `flow-engine` with correct responses and all Supabase rows written correctly.
@@ -1001,8 +998,9 @@ Criteria: 48h of real traffic with no processing failures, all E2E test scenario
 
 ---
 
-### n8n decommission
+### n8n decommission (blocked — awaiting 48h verification + Google Calendar fix)
 
+- [ ] Google Calendar service account access confirmed working end-to-end
 - [ ] Export all n8n workflow JSONs as backup archive
 - [ ] Stop `n8n` and `n8n-worker` Railway services
 - [ ] Move n8n build docs to `clients/hey-aircon/plans/build/archive/` (do not delete)

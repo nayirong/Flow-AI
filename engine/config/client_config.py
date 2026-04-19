@@ -42,6 +42,8 @@ class ClientConfig:
     google_calendar_creds: dict
     supabase_url: str
     supabase_service_key: str
+    anthropic_api_key: str
+    openai_api_key: str
     timezone: str
     is_active: bool
 
@@ -99,15 +101,23 @@ async def load_client_config(client_id: str) -> ClientConfig:
     meta_whatsapp_token = os.getenv(f"{client_id_upper}_META_WHATSAPP_TOKEN")
     if not meta_whatsapp_token:
         raise ClientConfigError(f"Missing env var: {client_id_upper}_META_WHATSAPP_TOKEN")
-    
+
     supabase_url = os.getenv(f"{client_id_upper}_SUPABASE_URL")
     if not supabase_url:
         raise ClientConfigError(f"Missing env var: {client_id_upper}_SUPABASE_URL")
-    
+
     supabase_service_key = os.getenv(f"{client_id_upper}_SUPABASE_SERVICE_KEY")
     if not supabase_service_key:
         raise ClientConfigError(f"Missing env var: {client_id_upper}_SUPABASE_SERVICE_KEY")
-    
+
+    anthropic_api_key = os.getenv(f"{client_id_upper}_ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        raise ClientConfigError(f"Missing env var: {client_id_upper}_ANTHROPIC_API_KEY")
+
+    openai_api_key = os.getenv(f"{client_id_upper}_OPENAI_API_KEY")
+    if not openai_api_key:
+        raise ClientConfigError(f"Missing env var: {client_id_upper}_OPENAI_API_KEY")
+
     google_calendar_creds_json = os.getenv(f"{client_id_upper}_GOOGLE_CALENDAR_CREDS", "{}")
     google_calendar_creds = json.loads(google_calendar_creds_json)
     
@@ -123,6 +133,8 @@ async def load_client_config(client_id: str) -> ClientConfig:
         google_calendar_creds=google_calendar_creds,
         supabase_url=supabase_url,
         supabase_service_key=supabase_service_key,
+        anthropic_api_key=anthropic_api_key,
+        openai_api_key=openai_api_key,
         timezone=row.get("timezone", "Asia/Singapore"),
         is_active=row["is_active"],
     )

@@ -5,8 +5,8 @@
 Flow AI is a vertical AI agent platform for service SMEs in SEA. It automates customer engagement, booking, and CRM via WhatsApp. The primary channel is Meta Cloud API (WhatsApp Business).
 
 **Pilot client:** HeyAircon — Singapore aircon servicing company.
-**Current state (as of April 2026):** Phase 1 MVP in progress. Components A–C running on n8n + Railway. Components D–E pending Meta credentials. Migration to Python engine planned — n8n build continues until Python engine is verified in production.
-**Migration target:** Replace n8n with a Flow AI-owned Python/FastAPI orchestration engine.
+**Current state (as of 2026-04-19):** Python orchestration engine is live in production receiving real WhatsApp traffic for HeyAircon. Meta webhook verified. Per-client LLM billing keys implemented. Shared Supabase provisioned. Google Calendar integration blocked on service account access (fix pending). n8n decommission pending 48h verification + calendar fix.
+**Migration target:** Replace n8n with a Flow AI-owned Python/FastAPI orchestration engine — engine is now live; n8n still running in parallel until decommission gate passed.
 
 ---
 
@@ -67,11 +67,11 @@ The engine is client-agnostic. Client config is loaded at runtime by `client_id`
 
 **Hybrid config approach (decided April 2026):**
 - Non-sensitive fields (`meta_phone_number_id`, `meta_verify_token`, `human_agent_number`, `google_calendar_creds`, `is_active`) → shared Flow AI Supabase `clients` table
-- High-sensitivity secrets (`meta_whatsapp_token`, `supabase_url`, `supabase_service_key`) → Railway env vars, namespaced by client (`{CLIENT_ID_UPPER}_{VAR}`)
+- High-sensitivity secrets (`meta_whatsapp_token`, `supabase_url`, `supabase_service_key`, `anthropic_api_key`, `openai_api_key`) → Railway env vars, namespaced by client (`{CLIENT_ID_UPPER}_{VAR}`). LLM keys are per-client — each client is billed separately on their own Anthropic and OpenAI accounts.
 - Cache `clients` table lookups in-process (5-min TTL minimum) — shared config DB cannot be a per-request dependency
 - Migration path: move secrets to a secrets manager (AWS/GCP) at 10–20 clients
 
-Adding a new client = INSERT into `clients` table + add 3 env vars to Railway. No engine changes. No redeploy for non-secret config updates.
+Adding a new client = INSERT into `clients` table + add 5 env vars to Railway. No engine changes. No redeploy for non-secret config updates.
 
 ### Escalation gate
 The escalation gate (`customers.escalation_flag`) is a hard programmatic check that runs before the agent. If true: send holding reply, log, stop. The agent never decides whether it is escalated. This is not configurable.
@@ -80,7 +80,7 @@ The escalation gate (`customers.escalation_flag`) is a hard programmatic check t
 The agent adds calendar events only. It never modifies or deletes. All changes go through human escalation.
 
 ### n8n preservation rule
-All n8n build documents are living references — do not archive or modify them until the Python engine is verified in production and the Meta webhook cutover is confirmed. If the migration is scrapped, n8n docs must be sufficient to deliver the full MVP.
+All n8n build documents are living references — do not archive or modify them until the Python engine has passed its 48h production verification window, the Google Calendar integration is confirmed working, and explicit decommission approval is given. Python engine is live as of 2026-04-19 and Meta webhook cutover is confirmed — but the 48h window and calendar fix are not yet cleared. If the migration is scrapped, n8n docs must be sufficient to deliver the full MVP.
 
 ---
 
@@ -116,6 +116,10 @@ clients/
     plans/                 # mvp_scope.md, proj_plan.md
     product/               # PRD, persona, knowledge base
     website/               # static HTML site
+    invoices/              # generated PDF invoices (output of finance/invoice_generator.py)
+
+finance/
+  invoice_generator.py     # reusable PDF invoice generator (CLI + importable module)
 
 Product/docs/              ← platform-level PRDs and standards (rename to platform/ eventually)
 .flow/                     ← agent templates, task queue, onboarding guide
@@ -137,6 +141,8 @@ Product/docs/              ← platform-level PRDs and standards (rename to plat
 | Python engine architecture (once created) | `docs/architecture/00_platform_architecture.md` |
 | Current agent task queue | `.flow/tasks/active.md`, `.flow/tasks/blocked.md` |
 | Client onboarding process | `.flow/onboarding.md` |
+| Generating a client invoice | Run `/generate-invoice` skill; script at `finance/invoice_generator.py` |
+| Client invoice history | `clients/{client_id}/invoices/` |
 
 ---
 
@@ -152,6 +158,32 @@ Product/docs/              ← platform-level PRDs and standards (rename to plat
 
 ---
 
+## Bespoke vs Core Feature Framework
+
+Every new client requirement must pass through this evaluation before any code is written. **Not implemented yet — framework is parked for when the first multi-client scenario arises.**
+
+### Decision tests (run in order, stop at first match)
+
+| Test | Question | YES | NO |
+|------|----------|-----|----|
+| T1: Universality | Useful to every future client regardless of industry? | **Core** — add to `engine/core/` | T2 |
+| T2: Portability | Same pattern reusable across clients, even if content differs? | **Core** — abstract pattern, configure content via Supabase | T3 |
+| T3: Isolation | Uniquely tied to one client's product or business process? | **Bespoke** — lives in `clients/{client_id}/` | Revisit |
+
+### When implemented, the structure will be:
+- `engine/config/bespoke_loader.py` — loads client extensions, merges into core at request time
+- `clients/{client_id}/tools/` — bespoke tool definitions and functions
+- `clients/{client_id}/prompts/` — static prompt extensions (fallback for logic-heavy cases)
+- `prompt_extensions` table in per-client Supabase — client-managed prompt additions (no redeploy)
+
+### Promotion pathway (bespoke → core)
+Trigger: feature live 30+ days with one client AND a second client independently requests the same capability. Owner (founder) decides promotion. Pattern moves to `engine/core/`; content moves to Supabase `config`.
+
+### Hard rule
+Nothing inside `engine/core/` imports from `clients/`. Dependency is one-directional.
+
+---
+
 ## Hard Rules
 
 - Never dispatch `@software-engineer` directly. All implementation goes through `@sdet-engineer`.
@@ -164,13 +196,30 @@ Product/docs/              ← platform-level PRDs and standards (rename to plat
 
 ---
 
-## Current Blockers (as of 2026-04-15)
+## Railway Deployment Model (decided 2026-04-18)
+
+**Option A — one Railway project per client, single monorepo.**
+
+- One Railway account hosts N projects (no per-client account needed).
+- Each client = one Railway project with its own service, env vars, and deploy history.
+- All Railway projects connect to the same GitHub repo (`flow-ai`).
+- **5 env vars per client:** `{CLIENT_ID_UPPER}_META_WHATSAPP_TOKEN`, `_SUPABASE_URL`, `_SUPABASE_SERVICE_KEY`, `_ANTHROPIC_API_KEY`, `_OPENAI_API_KEY`
+- **Branch strategy:** each Railway project tracks the `release` branch, not `main`. Promotes to release when ready — controls blast radius.
+  - Develop/merge freely on `main`.
+  - `git push origin main:release` when ready to deploy to all active clients.
+  - Can deploy to one client first (update that project's branch to a feature branch) before promoting to all.
+- Adding a new client = create Railway project + add 3 env vars (`{CLIENT_ID_UPPER}_META_WHATSAPP_TOKEN`, `_SUPABASE_URL`, `_SUPABASE_SERVICE_KEY`) + INSERT into shared `clients` table. No engine changes.
+- Switch to manual deploy (Railway toggle) if stricter per-client rollout control is needed at scale.
+
+---
+
+## Current Blockers (as of 2026-04-19)
 
 | Blocker | Impact |
 |---------|--------|
-| Meta dev account pending | Blocks real WhatsApp testing and n8n Components D/E |
-| Supabase migration in progress | Must complete before Component E (escalation tool) build |
-| Python engine not yet built | Migration planning complete; build starts after n8n D/E confirmed |
+| Google Calendar service account access | `write_booking` tool fails with 404. Fix: share `agent.heyaircon@gmail.com` calendar with the service account `client_email` from `HEY_AIRCON_GOOGLE_CALENDAR_CREDS`. User action required. |
+| n8n Component E (escalate-to-human) | Not yet built. Waiting on Google Calendar fix and 48h production verification of Python engine before proceeding. |
+| 48h production verification | Python engine is live as of 2026-04-19. Monitoring before n8n decommission decision. |
 
 ---
 
@@ -179,10 +228,10 @@ Product/docs/              ← platform-level PRDs and standards (rename to plat
 | Phase | Status |
 |-------|--------|
 | n8n Components A–C | Built and running on Railway |
-| n8n Component D (booking tools) | Pending Meta credentials |
-| n8n Component E (escalate-to-human) | Pending Supabase migration + Meta credentials |
-| Python engine: architecture design | Next — dispatch `@software-architect` with `00_architecture_reference.md` as input |
-| Python engine: build | After n8n D/E are confirmed working |
-| Python engine: parallel test | After build |
-| Meta webhook cutover to Python | After parallel test passes |
-| n8n decommission + doc archive | After cutover confirmed in production |
+| n8n Component D (booking tools) | Built in Python engine; partially live — blocked on Google Calendar 404 |
+| n8n Component E (escalate-to-human) | Not yet built — awaiting Google Calendar fix + 48h verification |
+| Python engine: architecture design | Complete — `docs/architecture/00_platform_architecture.md` (update in progress as of 2026-04-19) |
+| Python engine: build | Complete |
+| Python engine: parallel test | Skipped — went straight to production cutover |
+| Meta webhook cutover to Python | Complete — live as of 2026-04-19 |
+| n8n decommission + doc archive | Pending — requires 48h verification + Google Calendar fix + explicit approval |
