@@ -460,9 +460,11 @@ async def _execute_tool(block: Any, tool_dispatch: dict) -> dict:
         logger.warning(f"Tool not found in dispatch: {tool_name!r}")
         content = json.dumps({"error": "tool_not_found", "tool": tool_name})
     else:
+        logger.info(f"Executing tool: {tool_name!r} with input: {tool_input}")
         try:
             result = await tool_fn(**tool_input)
             content = json.dumps(result) if not isinstance(result, str) else result
+            logger.info(f"Tool {tool_name!r} succeeded")
         except Exception as e:
             logger.error(f"Tool {tool_name!r} raised: {e}", exc_info=True)
             content = json.dumps({"error": "tool_execution_failed", "message": str(e)})
