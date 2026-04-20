@@ -62,7 +62,7 @@ async def test_empty_sheet_writes_header_and_row():
         "customer_name": "John Doe",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-02T00:00:00Z",
-        "booking_count": 3,
+        "total_bookings": 3,
         "escalation_flag": False,
     }
     
@@ -103,7 +103,7 @@ async def test_new_row_appended():
         "customer_name": "Jane Doe",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-02T00:00:00Z",
-        "booking_count": 1,
+        "total_bookings": 1,
         "escalation_flag": True,
     }
     
@@ -143,7 +143,7 @@ async def test_existing_row_updated():
         "customer_name": "Updated Name",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-03T00:00:00Z",
-        "booking_count": 5,
+        "total_bookings": 5,
         "escalation_flag": False,
     }
     
@@ -168,11 +168,11 @@ async def test_existing_row_updated():
     # Verify update called (not append)
     mock_worksheet.update.assert_called_once()
     update_range = mock_worksheet.update.call_args[0][0]
-    assert update_range == "A2:G2"  # Row 2 (1-based, header is 1)
+    assert update_range == "A2:I2"  # Row 2 (1-based, header is 1), 9 customer columns
     updated_row = mock_worksheet.update.call_args[0][1][0]
     assert updated_row[2] == "Updated Name"
-    assert updated_row[4] == "2026-01-03T00:00:00Z"
-    assert updated_row[5] == "5"
+    assert updated_row[4] == "2026-01-03 08:00 SGT"  # last_seen converted to SGT
+    assert updated_row[5] == "5"  # total_bookings
     
     mock_worksheet.append_row.assert_not_called()
 
@@ -187,7 +187,7 @@ async def test_multiple_matches_updates_first_logs_warning():
         "customer_name": "Updated",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-04T00:00:00Z",
-        "booking_count": 10,
+        "total_bookings": 10,
         "escalation_flag": False,
     }
     
@@ -218,7 +218,7 @@ async def test_multiple_matches_updates_first_logs_warning():
     # Verify first row updated
     mock_worksheet.update.assert_called_once()
     update_range = mock_worksheet.update.call_args[0][0]
-    assert update_range == "A2:G2"  # First match (row 2)
+    assert update_range == "A2:I2"  # First match (row 2), 9 customer columns
 
 
 @pytest.mark.asyncio
@@ -278,10 +278,10 @@ async def test_sync_booking_to_sheets():
     mock_worksheet.append_row.assert_called_once()
     appended_row = mock_worksheet.append_row.call_args[0][0]
     assert appended_row[0] == "booking-uuid-1"
-    assert appended_row[3] == "Aircon Servicing"
-    assert appended_row[4] == "2026-04-25"
-    assert appended_row[5] == "AM"
-    assert appended_row[10] == "Confirmed"
+    assert appended_row[3] == "Aircon Servicing"  # service_type
+    assert appended_row[6] == "2026-04-25"        # slot_date → Booking Date
+    assert appended_row[7] == "AM"               # slot_window → Booking Time
+    assert appended_row[11] == "Confirmed"        # booking_status → Status
 
 
 @pytest.mark.asyncio
@@ -316,6 +316,6 @@ async def test_booking_sync_handles_missing_fields():
     mock_worksheet.append_row.assert_called_once()
     appended_row = mock_worksheet.append_row.call_args[0][0]
     assert appended_row[0] == "booking-uuid-2"
-    assert appended_row[2] == ""  # customer_name
-    assert appended_row[6] == ""  # address
-    assert appended_row[7] == ""  # postal_code
+    assert appended_row[2] == ""   # customer_name
+    assert appended_row[8] == ""   # address (index 8 in 13-col schema)
+    assert appended_row[9] == ""   # postal_code (index 9)

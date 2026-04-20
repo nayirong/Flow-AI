@@ -9,11 +9,32 @@ All gspread calls are synchronous — wrap in loop.run_in_executor.
 """
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Column headers (exact order matters)
+_SGT = timezone(timedelta(hours=8))
+
+
+def _to_sgt(ts) -> str:
+    """Convert a UTC timestamp (ISO string or datetime) to Singapore Time (UTC+8)."""
+    if not ts:
+        return ""
+    try:
+        if isinstance(ts, datetime):
+            dt = ts
+        else:
+            ts_str = str(ts).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_SGT).strftime("%Y-%m-%d %H:%M SGT")
+    except Exception:
+        return str(ts)
+
+
+# Column headers (exact order matters — must match Supabase column names used in row mappers)
 CUSTOMER_HEADERS = [
     "ID",
     "Phone Number",
@@ -22,6 +43,8 @@ CUSTOMER_HEADERS = [
     "Last Seen",
     "Booking Count",
     "Escalation Flag",
+    "Notes",
+    "Escalation Reason",
 ]
 
 BOOKING_HEADERS = [
@@ -29,11 +52,12 @@ BOOKING_HEADERS = [
     "Phone Number",
     "Customer Name",
     "Service Type",
+    "Unit Count",
+    "Aircon Brand",
     "Booking Date",
     "Booking Time",
     "Address",
     "Postal Code",
-    "Unit Number",
     "Notes",
     "Status",
     "Created At",
@@ -65,20 +89,22 @@ def _customer_to_row(data: dict) -> list:
         str(data.get("id", "")),
         str(data.get("phone_number", "")),
         str(data.get("customer_name", "")),
-        str(data.get("first_seen", "")),
-        str(data.get("last_seen", "")),
-        str(data.get("booking_count", 0)),
+        _to_sgt(data.get("first_seen", "")),
+        _to_sgt(data.get("last_seen", "")),
+        str(data.get("total_bookings", 0)),
         "TRUE" if data.get("escalation_flag") else "FALSE",
+        str(data.get("notes", "") or ""),
+        str(data.get("escalation_reason", "") or ""),
     ]
 
 
 def _booking_to_row(data: dict) -> list:
     """
     Convert booking dict to row list in BOOKING_HEADERS order.
-    
+
     Note: booking_tools.py uses different column names:
     - booking_id → id
-    - slot_date → booking_date
+    - slot_date  → booking_date
     - slot_window → booking_time
     - booking_status → status
     """
@@ -87,14 +113,15 @@ def _booking_to_row(data: dict) -> list:
         str(data.get("phone_number", "")),
         str(data.get("customer_name", "")),
         str(data.get("service_type", "")),
+        str(data.get("unit_count", "")),
+        str(data.get("aircon_brand", "") or ""),
         str(data.get("booking_date") or data.get("slot_date", "")),
         str(data.get("booking_time") or data.get("slot_window", "")),
         str(data.get("address", "")),
         str(data.get("postal_code", "")),
-        str(data.get("unit_number", "")),
-        str(data.get("notes", "")),
+        str(data.get("notes", "") or ""),
         str(data.get("status") or data.get("booking_status", "")),
-        str(data.get("created_at", "")),
+        _to_sgt(data.get("created_at", "")),
     ]
 
 
