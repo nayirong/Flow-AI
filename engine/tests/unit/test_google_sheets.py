@@ -281,7 +281,7 @@ async def test_sync_booking_to_sheets():
     assert appended_row[3] == "Aircon Servicing"
     assert appended_row[4] == "2026-04-25"
     assert appended_row[5] == "AM"
-    assert appended_row[9] == "Confirmed"
+    assert appended_row[10] == "Confirmed"
 
 
 @pytest.mark.asyncio
@@ -318,3 +318,4 @@ async def test_booking_sync_handles_missing_fields():
     assert appended_row[0] == "booking-uuid-2"
     assert appended_row[2] == ""  # customer_name
     assert appended_row[6] == ""  # address
+    assert appended_row[7] == ""  # postal_code

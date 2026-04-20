@@ -5,12 +5,21 @@ Slice 2: verify_webhook_token()
 Slice 3: send_message()
 """
 import logging
+import re
 
 import httpx
 
 from engine.config.client_config import ClientConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_markdown_to_whatsapp(text: str) -> str:
+    # **bold** → *bold* (WhatsApp bold uses single asterisks)
+    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    # ~~strikethrough~~ → ~strikethrough~
+    text = re.sub(r'~~(.+?)~~', r'~\1~', text)
+    return text
 
 
 async def verify_webhook_token(
@@ -47,6 +56,7 @@ async def send_message(
         True if message sent successfully, False otherwise.
         Never raises — caller checks return value.
     """
+    text = _convert_markdown_to_whatsapp(text)
     url = (
         f"https://graph.facebook.com/v19.0/"
         f"{client_config.meta_phone_number_id}/messages"
