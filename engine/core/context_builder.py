@@ -7,6 +7,7 @@ and fetches conversation history from interactions_log.
 Both functions are called before every Claude invocation.
 """
 import logging
+from datetime import date
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -178,9 +179,12 @@ async def build_system_message(db: Any) -> str:
     am_window = config_dict.get("appointment_window_am", "9am to 1pm")
     pm_window = config_dict.get("appointment_window_pm", "1pm to 6pm")
     lead_days = config_dict.get("booking_lead_time_days", "2")
+    today_str = date.today().strftime("%A, %d %B %Y")  # e.g. "Monday, 20 April 2026"
 
     appointment_section = (
         f"\nAPPOINTMENT WINDOWS:\n"
+        f"Today's date is {today_str}. Use this as the reference when interpreting "
+        f"relative dates from customers (e.g. 'next Wednesday', 'this Friday').\n"
         f"Our booking slots are:\n"
         f"- Morning (AM): {am_window}\n"
         f"- Afternoon (PM): {pm_window}\n"

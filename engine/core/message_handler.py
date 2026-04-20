@@ -144,27 +144,38 @@ async def handle_inbound_message(
             return  # Agent does NOT run for escalated customers.
 
         # ── Step 5: Upsert customer record ────────────────────────────────────
+        # Use upsert with ignore_duplicates=True (ON CONFLICT DO NOTHING) to
+        # guard against WhatsApp double-delivery: two concurrent webhooks for
+        # the same message both see customer_row=None at Step 3 and both reach
+        # here. Only one INSERT wins; the second is a silent no-op.
+        # Requires UNIQUE constraint on customers(phone_number) in Supabase.
         try:
             _now = datetime.now(timezone.utc).isoformat()
             if customer_row is None:
-                # New customer — create record.
-                insert_result = await db.table("customers").insert({
-                    "phone_number": phone_number,
-                    "customer_name": display_name,
-                    "first_seen": now,
-                    "last_seen": now,
-                    "escalation_flag": False,
-                }).execute()
-                logger.info(
-                    f"New customer created: {phone_number} (client: {client_id})"
-                )
-                # Sync to Sheets (fire-and-forget)
+                insert_result = await db.table("customers").upsert(
+                    {
+                        "phone_number": phone_number,
+                        "customer_name": display_name,
+                        "first_seen": now,
+                        "last_seen": now,
+                        "escalation_flag": False,
+                    },
+                    on_conflict="phone_number",
+                    ignore_duplicates=True,
+                ).execute()
                 if insert_result.data:
+                    logger.info(
+                        f"New customer created: {phone_number} (client: {client_id})"
+                    )
                     asyncio.create_task(sync_customer_to_sheets(
                         client_id=client_id,
                         client_config=client_config,
                         customer_data=insert_result.data[0],
                     ))
+                else:
+                    logger.debug(
+                        f"Customer insert no-op (race condition suppressed): {phone_number}"
+                    )
             else:
                 # Returning customer — update last_seen only.
                 await db.table("customers").update({
