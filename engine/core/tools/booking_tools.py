@@ -41,10 +41,13 @@ async def _alert_booking_failure(
 ) -> None:
     """Send a WhatsApp alert to the human agent when a booking backend failure occurs."""
     if not client_config.human_agent_number:
-        logger.error("No human_agent_number configured — cannot send booking failure alert")
+        logger.error(
+            "No human_agent_number configured — cannot send booking failure alert"
+        )
         return
     try:
         from engine.integrations.meta_whatsapp import send_message
+
         alert_text = _BOOKING_FAILURE_ALERT_TEMPLATE.format(
             phone_number=phone_number,
             customer_name=customer_name,
@@ -103,7 +106,7 @@ async def write_booking(
     """
     Confirm a booking: create Google Calendar event + INSERT into bookings table.
 
-    Also updates the customers record with name/address/postal collected during booking.
+    Also updates the customers record with name captured during booking.
 
     This is an atomic operation from the agent's perspective — both the calendar event
     and the DB row must succeed. If the calendar write fails, the booking is not created.
@@ -129,6 +132,12 @@ async def write_booking(
         Exception if Google Calendar write or Supabase INSERT fails.
         Caller (agent_runner._execute_tool) catches and returns error dict to Claude.
     """
+    if not address:
+        raise ValueError(
+            "write_booking() requires a non-empty address. "
+            "The agent must collect address from the customer before calling this tool."
+        )
+
     booking_id = _generate_booking_id(slot_date)
 
     # ── Step 1: Create Google Calendar event (mandatory — no booking without it) ──
@@ -153,6 +162,7 @@ async def write_booking(
         raise RuntimeError(error_msg)
 
     from engine.integrations.google_calendar import create_booking_event
+
     try:
         calendar_event_id = await create_booking_event(
             google_calendar_creds=client_config.google_calendar_creds,
@@ -194,6 +204,8 @@ async def write_booking(
         "phone_number": phone_number,
         "service_type": service_type,
         "unit_count": unit_count,
+        "address": address,
+        "postal_code": postal_code,
         "slot_date": slot_date,
         "slot_window": slot_window,
         "booking_status": "Confirmed",
@@ -236,8 +248,6 @@ async def write_booking(
     # ── Step 3: Update customer record with name/address captured in this flow ─
     customer_update: dict = {
         "customer_name": customer_name,
-        "address": address,
-        "postal_code": postal_code,
     }
     try:
         await (
@@ -292,6 +302,7 @@ async def get_customer_bookings(
     Never raises — on DB error returns empty bookings list.
     """
     from datetime import date
+
     today = date.today().isoformat()
 
     try:
@@ -311,9 +322,7 @@ async def get_customer_bookings(
         result = await query.limit(5).execute()
         bookings = result.data or []
     except Exception as e:
-        logger.error(
-            f"Failed to fetch bookings for {phone_number}: {e}", exc_info=True
-        )
+        logger.error(f"Failed to fetch bookings for {phone_number}: {e}", exc_info=True)
         bookings = []
 
     return {
