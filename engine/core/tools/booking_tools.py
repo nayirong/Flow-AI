@@ -200,11 +200,14 @@ async def write_booking(
         raise  # Re-raise so agent receives error and tells customer to wait for human
 
     # ── Step 2: INSERT booking row (only reached after successful calendar write) ─
+    # Note: customer_name is NOT a column in the bookings table — it lives in
+    # customers. We keep it in the dict only so Sheets sync can include it;
+    # it is NOT sent to Supabase (excluded from db_booking_row below).
     _created_at = datetime.now(timezone.utc).isoformat()
     booking_row: dict = {
         "booking_id": booking_id,
         "phone_number": phone_number,
-        "customer_name": customer_name,
+        "customer_name": customer_name,  # Sheets sync only — not in DB schema
         "service_type": service_type,
         "unit_count": unit_count,
         "address": address,
@@ -214,6 +217,7 @@ async def write_booking(
         "booking_status": "Confirmed",
         "created_at": _created_at,
     }
+    db_booking_row = {k: v for k, v in booking_row.items() if k != "customer_name"}
     if calendar_event_id:
         booking_row["calendar_event_id"] = calendar_event_id
     if aircon_brand:
@@ -222,8 +226,8 @@ async def write_booking(
         booking_row["notes"] = notes
 
     try:
-        await db.table("bookings").insert(booking_row).execute()
-        # Sync to Sheets (fire-and-forget)
+        await db.table("bookings").insert(db_booking_row).execute()
+        # Sync to Sheets with full booking_row (includes customer_name for Sheets column)
         asyncio.create_task(sync_booking_to_sheets(
             client_id=client_config.client_id,
             client_config=client_config,
