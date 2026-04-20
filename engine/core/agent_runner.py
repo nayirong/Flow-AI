@@ -35,6 +35,33 @@ _FALLBACK_RESPONSE = (
     "Please try again in a moment, or our team will be happy to assist you directly."
 )
 
+# Guardrail: block confirmation language if write_booking never succeeded in this turn.
+# Prevents the agent from telling a customer their booking is confirmed when no
+# calendar event was created and no Supabase row was written.
+_BOOKING_GUARDRAIL_FALLBACK = (
+    "I'm sorry, I wasn't able to complete your booking right now. "
+    "Our team will follow up with you shortly to confirm your appointment."
+)
+_BOOKING_CONFIRMATION_KEYWORDS = [
+    "confirmed",
+    "booked",
+    "booking reference",
+    "booking id",
+    "all set",
+    "appointment is set",
+    "see you on",
+    "your booking",
+    "has been scheduled",
+    "we'll see you",
+    "we will see you",
+]
+
+
+def _contains_booking_confirmation(text: str) -> bool:
+    """Return True if text contains booking confirmation language."""
+    lower = text.lower()
+    return any(keyword in lower for keyword in _BOOKING_CONFIRMATION_KEYWORDS)
+
 
 # ── Provider shim ─────────────────────────────────────────────────────────────
 
@@ -275,6 +302,11 @@ async def run_agent(
     active_provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     fallback_enabled = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() != "false"
 
+    # Guardrail: tracks whether write_booking completed successfully this invocation.
+    # If the agent produces confirmation language without a successful write_booking,
+    # the response is intercepted and replaced with a safe fallback.
+    booking_write_succeeded = False
+
     # Build initial messages list: history + current inbound
     messages: list[dict] = list(conversation_history) + [
         {"role": "user", "content": current_message}
@@ -377,6 +409,18 @@ async def run_agent(
                 f"Agent response generated (iter={iteration + 1}, "
                 f"chars={len(final_text)})"
             )
+
+            # Guardrail: if the agent claims to have confirmed a booking but
+            # write_booking never succeeded, intercept and return a safe fallback.
+            if not booking_write_succeeded and _contains_booking_confirmation(final_text):
+                logger.warning(
+                    "GUARDRAIL FIRED: agent sent booking confirmation without successful "
+                    "write_booking (iter=%d, client_id=%s). Returning safe fallback.",
+                    iteration + 1,
+                    client_id,
+                )
+                return _BOOKING_GUARDRAIL_FALLBACK
+
             return final_text or _FALLBACK_RESPONSE
 
         # ── Tool use — execute tools and loop ─────────────────────────────────
@@ -396,6 +440,20 @@ async def run_agent(
                         tool_dispatch=tool_dispatch,
                     )
                     tool_results.append(tool_result)
+
+                    # Guardrail tracking: mark write_booking as succeeded only when
+                    # the tool returned a booking_id without an error key.
+                    if getattr(block, "name", None) == "write_booking":
+                        try:
+                            result_data = json.loads(tool_result["content"])
+                            if "booking_id" in result_data and "error" not in result_data:
+                                booking_write_succeeded = True
+                                logger.info(
+                                    "write_booking succeeded (booking_id=%s)",
+                                    result_data["booking_id"],
+                                )
+                        except (json.JSONDecodeError, TypeError):
+                            pass
 
             # Append tool results as a user turn
             messages.append({

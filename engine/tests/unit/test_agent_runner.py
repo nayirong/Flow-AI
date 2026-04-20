@@ -289,3 +289,102 @@ async def test_model_name_override(monkeypatch):
     import engine.core.agent_runner as ar_mod
     assert ar_mod._get_model_name() == "claude-custom-model"
     monkeypatch.delenv("LLM_MODEL_OVERRIDE")
+
+
+# ── Booking confirmation guardrail tests ──────────────────────────────────────
+
+@pytest.mark.asyncio
+@patch("engine.core.agent_runner._get_llm_client")
+@patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
+async def test_guardrail_fires_when_write_booking_not_called(mock_call_llm, mock_get_client):
+    """
+    Agent returns booking confirmation language but write_booking was never called.
+    Guardrail must intercept and return the safe fallback — NOT the confirmation.
+    """
+    from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
+
+    # Agent skips tools and goes straight to a confirmation reply
+    mock_call_llm.return_value = _end_turn_response(
+        "Your booking is confirmed for 30 April AM. See you on the day!"
+    )
+
+    result = await run_agent(
+        system_message="Sys.",
+        conversation_history=[],
+        current_message="Book me for 30 April AM.",
+        tool_definitions=[],
+        tool_dispatch={},
+    )
+
+    assert result == _BOOKING_GUARDRAIL_FALLBACK
+    assert mock_call_llm.call_count == 1
+
+
+@pytest.mark.asyncio
+@patch("engine.core.agent_runner._get_llm_client")
+@patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
+async def test_guardrail_passes_when_write_booking_succeeded(mock_call_llm, mock_get_client):
+    """
+    Agent calls write_booking (returns a booking_id), then returns confirmation language.
+    Guardrail must NOT intercept — the confirmation is legitimate.
+    """
+    from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
+
+    tool_resp = _tool_use_response(
+        tool_name="write_booking",
+        tool_id="tool_wb_001",
+        tool_input={"service_type": "Aircon Chemical Wash", "slot_date": "2026-04-30"},
+    )
+    confirmation_text = "Your booking is confirmed for 30 April AM. See you on the day!"
+    end_resp = _end_turn_response(confirmation_text)
+
+    mock_call_llm.side_effect = [tool_resp, end_resp]
+
+    async def mock_write_booking(**kwargs):
+        return {"booking_id": "BK-2026-001", "status": "confirmed"}
+
+    result = await run_agent(
+        system_message="Sys.",
+        conversation_history=[],
+        current_message="Book me for 30 April AM.",
+        tool_definitions=[{"name": "write_booking"}],
+        tool_dispatch={"write_booking": mock_write_booking},
+    )
+
+    # Confirmation should pass through — write_booking succeeded
+    assert result == confirmation_text
+    assert result != _BOOKING_GUARDRAIL_FALLBACK
+    assert mock_call_llm.call_count == 2
+
+
+@pytest.mark.asyncio
+@patch("engine.core.agent_runner._get_llm_client")
+@patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
+async def test_guardrail_fires_when_write_booking_returns_error(mock_call_llm, mock_get_client):
+    """
+    Agent calls write_booking but it returns an error (no booking_id).
+    Agent then returns confirmation language — guardrail must intercept.
+    """
+    from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
+
+    tool_resp = _tool_use_response(
+        tool_name="write_booking",
+        tool_id="tool_wb_002",
+        tool_input={"service_type": "Aircon Service", "slot_date": "2026-04-30"},
+    )
+    end_resp = _end_turn_response("Your booking is confirmed!")
+
+    mock_call_llm.side_effect = [tool_resp, end_resp]
+
+    async def mock_write_booking_fail(**kwargs):
+        return {"error": "calendar_unavailable", "message": "Could not create calendar event"}
+
+    result = await run_agent(
+        system_message="Sys.",
+        conversation_history=[],
+        current_message="Book me for 30 April AM.",
+        tool_definitions=[{"name": "write_booking"}],
+        tool_dispatch={"write_booking": mock_write_booking_fail},
+    )
+
+    assert result == _BOOKING_GUARDRAIL_FALLBACK
