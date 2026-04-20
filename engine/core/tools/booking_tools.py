@@ -8,6 +8,7 @@ import asyncio
 import logging
 import random
 import string
+from datetime import datetime, timezone
 from typing import Optional
 
 from engine.integrations.google_sheets import sync_booking_to_sheets
@@ -199,9 +200,11 @@ async def write_booking(
         raise  # Re-raise so agent receives error and tells customer to wait for human
 
     # ── Step 2: INSERT booking row (only reached after successful calendar write) ─
+    _created_at = datetime.now(timezone.utc).isoformat()
     booking_row: dict = {
         "booking_id": booking_id,
         "phone_number": phone_number,
+        "customer_name": customer_name,
         "service_type": service_type,
         "unit_count": unit_count,
         "address": address,
@@ -209,6 +212,7 @@ async def write_booking(
         "slot_date": slot_date,
         "slot_window": slot_window,
         "booking_status": "Confirmed",
+        "created_at": _created_at,
     }
     if calendar_event_id:
         booking_row["calendar_event_id"] = calendar_event_id
