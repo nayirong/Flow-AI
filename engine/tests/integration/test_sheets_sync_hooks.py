@@ -33,7 +33,7 @@ async def test_message_handler_syncs_new_customer():
                                 mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute = AsyncMock(
                                     return_value=MagicMock(data=[])
                                 )
-                                # INSERT returns new customer row
+                                # UPSERT returns new customer row
                                 new_customer = {
                                     "id": "uuid-new",
                                     "phone_number": "1234567890",
@@ -42,7 +42,7 @@ async def test_message_handler_syncs_new_customer():
                                     "last_seen": datetime.now(timezone.utc).isoformat(),
                                     "escalation_flag": False,
                                 }
-                                mock_db.table.return_value.insert.return_value.execute = AsyncMock(
+                                mock_db.table.return_value.upsert.return_value.execute = AsyncMock(
                                     return_value=MagicMock(data=[new_customer])
                                 )
                                 mock_get_db.return_value = mock_db
@@ -202,7 +202,7 @@ async def test_sync_exception_does_not_crash_handler():
                                     "last_seen": datetime.now(timezone.utc).isoformat(),
                                     "escalation_flag": False,
                                 }
-                                mock_db.table.return_value.insert.return_value.execute = AsyncMock(
+                                mock_db.table.return_value.upsert.return_value.execute = AsyncMock(
                                     return_value=MagicMock(data=[new_customer])
                                 )
                                 mock_get_db.return_value = mock_db

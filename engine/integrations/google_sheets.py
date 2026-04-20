@@ -32,6 +32,7 @@ BOOKING_HEADERS = [
     "Booking Date",
     "Booking Time",
     "Address",
+    "Postal Code",
     "Unit Number",
     "Notes",
     "Status",
@@ -89,6 +90,7 @@ def _booking_to_row(data: dict) -> list:
         str(data.get("booking_date") or data.get("slot_date", "")),
         str(data.get("booking_time") or data.get("slot_window", "")),
         str(data.get("address", "")),
+        str(data.get("postal_code", "")),
         str(data.get("unit_number", "")),
         str(data.get("notes", "")),
         str(data.get("status") or data.get("booking_status", "")),
@@ -130,7 +132,15 @@ def _sync_row(
             f"Sheets sync: created header + row in {tab_name} (ID: {row_id})"
         )
         return
-    
+
+    # First row is not the expected header — insert header at top
+    if all_rows[0] != headers:
+        worksheet.insert_row(headers, index=1)
+        all_rows = [headers] + all_rows
+        logger.info(
+            f"Sheets sync: inserted missing header row in {tab_name}"
+        )
+
     # Only header row — append data
     if len(all_rows) == 1:
         worksheet.append_row(row_data)
