@@ -101,11 +101,77 @@ async def build_system_message(db: Any) -> str:
     services_section = "\nSERVICES:\n" + "\n".join(services_lines) + "\n"
 
     # ── Section 3 — PRICING ───────────────────────────────────────────────────
-    pricing_lines = [
-        f"- {row['value']}"
-        for row in config_rows
-        if row["key"].startswith("pricing_")
-    ]
+    # Partition pricing rows into variation keys (contain '__') and flat keys.
+    # variation_groups: parent_slug → list of (variation_slug, value) in insertion order.
+    variation_groups: dict[str, list[tuple[str, str]]] = {}
+    for row in config_rows:
+        key = row["key"]
+        if not key.startswith("pricing_"):
+            continue
+        slug_part = key[len("pricing_"):]  # strip leading "pricing_"
+        if "__" in slug_part:
+            parent_slug, variation_slug = slug_part.split("__", 1)
+            if parent_slug not in variation_groups:
+                variation_groups[parent_slug] = []
+            variation_groups[parent_slug].append((variation_slug, row["value"]))
+
+    # Build pricing section by iterating config_rows in sort_order.
+    # seen_parents ensures each variation group block is emitted exactly once.
+    pricing_lines: list[str] = []
+    seen_parents: set[str] = set()
+
+    for row in config_rows:
+        key = row["key"]
+        if not key.startswith("pricing_"):
+            continue
+        slug_part = key[len("pricing_"):]
+
+        if "__" in slug_part:
+            # Variation key — emit the group block once per parent
+            parent_slug = slug_part.split("__", 1)[0]
+            if parent_slug in seen_parents:
+                continue
+            seen_parents.add(parent_slug)
+
+            hint_value = config_dict.get(f"variation_hint_{parent_slug}")
+            variations = variation_groups[parent_slug]
+
+            if hint_value is None:
+                # Missing hint row — warn and render as flat bullets (AC-08)
+                logger.warning(
+                    f"variation_hint_{parent_slug} missing from config; "
+                    "rendering variation rows as flat bullets"
+                )
+                for _var_slug, var_value in variations:
+                    pricing_lines.append(f"- {var_value}")
+            elif hint_value == "none":
+                # Sentinel — silently render as flat bullets (spec section 5.2)
+                for _var_slug, var_value in variations:
+                    pricing_lines.append(f"- {var_value}")
+            else:
+                # Active hint — render structured variation block (spec section 5.1)
+                display_name = parent_slug.replace("_", " ").title()
+                block_lines = [f"- {display_name}: pricing varies by unit size."]
+                block_lines.append("  Variations:")
+                for _var_slug, var_value in variations:
+                    block_lines.append(f"    \u2022 {var_value}")
+                block_lines.append(
+                    f"  Clarification required: before quoting or booking, ask: \"{hint_value}\""
+                )
+                pricing_lines.append("\n".join(block_lines))
+        else:
+            # Flat pricing key (no '__')
+            service_slug = slug_part
+            hint_value = config_dict.get(f"variation_hint_{service_slug}")
+            if hint_value is not None and hint_value != "none":
+                # Anomalous: active hint exists for a flat (non-variation) key — warn
+                logger.warning(
+                    f"variation_hint_{service_slug} is set to an active hint value "
+                    f"but pricing_{service_slug} has no variation keys (no '__'); "
+                    "rendering as flat bullet"
+                )
+            pricing_lines.append(f"- {row['value']}")
+
     pricing_section = "\nPRICING:\n" + "\n".join(pricing_lines) + "\n"
 
     # ── Section 4 — APPOINTMENT WINDOWS ───────────────────────────────────────
