@@ -31,7 +31,7 @@
 | `core/tools/__init__.py` | Exports `TOOL_DEFINITIONS` and `build_tool_dispatch()`; `build_tool_dispatch()` injects `db`, `client_config`, `phone_number` into tool closures per request | 9 |
 | `core/tools/definitions.py` | Static list of 4 Anthropic-format tool dicts: `check_calendar_availability`, `write_booking`, `get_customer_bookings`, `escalate_to_human` | 9 |
 | `core/tools/calendar_tools.py` | `check_calendar_availability()` — wraps `integrations/google_calendar.py`; returns AM/PM availability + human-readable message for Claude | 9 |
-| `core/tools/booking_tools.py` | `write_booking()` — calendar event + Supabase INSERT + customer update; `get_customer_bookings()` — reads last 5 bookings; alerts human agent on backend failure | 9 |
+| `core/tools/booking_tools.py` | `write_booking()` — calendar event + Supabase INSERT into `bookings` (incl. `address`, `postal_code` post-migration) + customer name update; `get_customer_bookings()` — reads last 5 bookings; alerts human agent on backend failure | 9 |
 | `core/tools/escalation_tool.py` | `escalate_to_human()` — sets `escalation_flag=True` on customer row, sends WhatsApp alert to `human_agent_number` | 9 |
 | `config/settings.py` | `Settings` (pydantic-settings): platform-level env vars — `SHARED_SUPABASE_URL`, `SHARED_SUPABASE_SERVICE_KEY`, `LOG_LEVEL`; lazy singleton via `get_settings()` | 4 |
 | `config/client_config.py` | `ClientConfig` dataclass + `load_client_config()`: reads shared `clients` table + 5 per-client env vars; in-process TTL cache (5 min) | 4 |
@@ -63,10 +63,10 @@
 | `customers` | INSERT | First message from a new customer | `core/message_handler.py` |
 | `customers` | UPDATE (`last_seen`) | Every message from a returning customer | `core/message_handler.py` |
 | `customers` | UPDATE (`escalation_flag`, `escalation_reason`) | When agent calls `escalate_to_human` tool | `core/tools/escalation_tool.py` |
-| `customers` | UPDATE (`customer_name`, `address`, `postal_code`) | After a successful `write_booking` call | `core/tools/booking_tools.py` |
+| `customers` | UPDATE (`customer_name`) | After a successful `write_booking` call — address/postal_code moved to `bookings` (see `address_schema_migration.md`) | `core/tools/booking_tools.py` |
 | `config` | SELECT (all rows, ordered by `sort_order`) | Before every Claude call, to build system prompt | `core/context_builder.py` |
 | `policies` | SELECT (all rows, ordered by `sort_order`) | Before every Claude call, to build system prompt | `core/context_builder.py` |
-| `bookings` | INSERT | When agent confirms a booking via `write_booking` tool | `core/tools/booking_tools.py` |
+| `bookings` | INSERT (incl. `address`, `postal_code` after Phase 2 migration) | When agent confirms a booking via `write_booking` tool | `core/tools/booking_tools.py` |
 | `bookings` | SELECT (last 5, by phone) | When agent calls `get_customer_bookings` tool | `core/tools/booking_tools.py` |
 
 ---

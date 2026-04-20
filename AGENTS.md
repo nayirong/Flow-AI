@@ -1,7 +1,7 @@
 # AGENTS.md — Flow AI Master Agent Index
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-19
+> Last Updated: 2026-04-20
 
 ---
 
@@ -88,6 +88,7 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 | Client config isolation: hybrid approach | Decided 2026-04-15 — non-sensitive fields in Supabase `clients` table; 5 secrets in Railway env vars (namespaced): `meta_whatsapp_token`, `supabase_url`, `supabase_service_key`, `anthropic_api_key`, `openai_api_key`. LLM keys per-client (each client billed on their own accounts). Migrate to secrets manager at 10–20 clients. |
 | Monorepo | Decided 2026-04-15 — single repo; split before client 3 |
 | Railway deployment model | Decided 2026-04-18 — Option A: one Railway project per client, all connected to same repo. Each project tracks `release` branch (not `main`) so deploys are explicit and per-client. Adding a client = new Railway project + 3 env vars + 1 Supabase row. |
+| Google Sheets sync — Core, not bespoke | Decided 2026-04-20 — Post-write sync to external visibility layer is a portable platform pattern. Lives in `integrations/google_sheets.py`. Config flags (`sheets_sync_enabled`, `sheets_spreadsheet_id`) in `clients` table. Sheets failure is fire-and-forget — never rolls back Supabase write. Phase 2 will replace Sheets with dashboard; sync layer must not block that migration. Tables synced: `customers` + `bookings` only (`interactions_log` excluded). |
 
 ---
 

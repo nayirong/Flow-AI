@@ -13,7 +13,18 @@
       "Bash(python3 finance/invoice_generator.py --client-name HeyAircon --client-contact '+65 8841 9968' --client-address '' --invoice-number INV-HA-20260402 --invoice-date 2026-04-18 --services '[{\"description\": \"Phase 1 - Go-Live \\(System live and tested\\)\", \"qty\": 1, \"unit_price\": 450}]' --currency SGD --payment-terms 'Bank transfer to DBS Savings 030-64719-0' --notes 'Thank you for choosing Flow AI.' --output-dir clients/hey-aircon/invoices)",
       "Bash(python3 -c ' *)",
       "Bash(python -m pytest engine/tests/unit/ -q)",
-      "Bash(python3 -m pytest engine/tests/unit/ -q)"
+      "Bash(python3 -m pytest engine/tests/unit/ -q)",
+      "Bash(railway status *)",
+      "Bash(curl -s https://flow-ai-production-9296.up.railway.app/health)",
+      "Bash(python -m pytest engine/tests/unit/test_context_builder.py -v)",
+      "Bash(python3 -m pytest engine/tests/unit/test_context_builder.py -v)",
+      "Bash(rm \"/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/docs/test-plan/features/service_variations_test_plan.md\")",
+      "Bash(git merge feat/service-variations-slice1 --no-ff -m ' *)",
+      "Bash(python -m pytest engine/tests/unit/test_address_schema_migration.py -v)",
+      "Bash(python3 -m pytest engine/tests/unit/test_address_schema_migration.py -v)",
+      "Bash(black --check engine/core/tools/booking_tools.py engine/tests/unit/test_address_schema_migration.py)",
+      "Bash(black engine/core/tools/booking_tools.py engine/tests/unit/test_address_schema_migration.py)",
+      "Bash(python3 -m pytest engine/tests/unit/test_address_schema_migration.py engine/tests/unit/ -v)"
     ],
     "additionalDirectories": [
       "/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/.claude/skills",

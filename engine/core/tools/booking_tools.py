@@ -4,10 +4,13 @@ Booking tool functions for the agent tool-use loop.
 Writes confirmed bookings to Supabase and reads a customer's booking history.
 db, client_config, and phone_number are injected via closure in build_tool_dispatch().
 """
+import asyncio
 import logging
 import random
 import string
 from typing import Optional
+
+from engine.integrations.google_sheets import sync_booking_to_sheets
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +207,12 @@ async def write_booking(
 
     try:
         await db.table("bookings").insert(booking_row).execute()
+        # Sync to Sheets (fire-and-forget)
+        asyncio.create_task(sync_booking_to_sheets(
+            client_id=client_config.client_id,
+            client_config=client_config,
+            booking_data=booking_row,
+        ))
     except Exception as db_err:
         logger.error(
             f"DB write failed for booking {booking_id} ({phone_number}) "

@@ -46,6 +46,9 @@ class ClientConfig:
     openai_api_key: str
     timezone: str
     is_active: bool
+    sheets_sync_enabled: bool = False
+    sheets_spreadsheet_id: str | None = None
+    sheets_service_account_creds: dict | None = None
 
 
 class ClientNotFoundError(Exception):
@@ -137,6 +140,9 @@ async def load_client_config(client_id: str) -> ClientConfig:
         openai_api_key=openai_api_key,
         timezone=row.get("timezone", "Asia/Singapore"),
         is_active=row["is_active"],
+        sheets_sync_enabled=row.get("sheets_sync_enabled", False),
+        sheets_spreadsheet_id=row.get("sheets_spreadsheet_id"),
+        sheets_service_account_creds=row.get("sheets_service_account_creds"),
     )
     
     # 5. Cache with TTL

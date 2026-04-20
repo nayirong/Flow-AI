@@ -1,4 +1,10 @@
-"""
+UPDATE clients SET
+  sheets_sync_enabled = TRUE,
+  sheets_spreadsheet_id = '<your-spreadsheet-id>',
+  sheets_service_account_creds = (
+    SELECT google_calendar_creds FROM clients WHERE client_id = 'hey-aircon'
+  )
+WHERE client_id = 'hey-aircon';"""
 Observability — LLM provider incident logging and usage tracking.
 
 Writes to two tables in the shared Flow AI Supabase (not per-client):

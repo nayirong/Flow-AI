@@ -1,4 +1,4 @@
-"""
+"""  
 Inbound message processing pipeline — Flow AI engine core.
 
 Pipeline (Slice 3):
@@ -12,12 +12,14 @@ Pipeline (Slice 3):
 All exceptions are caught at the outer level — nothing propagates to the webhook.
 The webhook has already returned 200 to Meta before this function runs.
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 
 from engine.config.client_config import load_client_config, ClientNotFoundError
 from engine.integrations.supabase_client import get_client_db
 from engine.integrations.meta_whatsapp import send_message
+from engine.integrations.google_sheets import sync_customer_to_sheets
 from engine.core.context_builder import build_system_message, fetch_conversation_history
 from engine.core.agent_runner import run_agent
 from engine.core.tools import TOOL_DEFINITIONS, build_tool_dispatch
@@ -146,7 +148,7 @@ async def handle_inbound_message(
             _now = datetime.now(timezone.utc).isoformat()
             if customer_row is None:
                 # New customer — create record.
-                await db.table("customers").insert({
+                insert_result = await db.table("customers").insert({
                     "phone_number": phone_number,
                     "customer_name": display_name,
                     "first_seen": now,
@@ -156,6 +158,13 @@ async def handle_inbound_message(
                 logger.info(
                     f"New customer created: {phone_number} (client: {client_id})"
                 )
+                # Sync to Sheets (fire-and-forget)
+                if insert_result.data:
+                    asyncio.create_task(sync_customer_to_sheets(
+                        client_id=client_id,
+                        client_config=client_config,
+                        customer_data=insert_result.data[0],
+                    ))
             else:
                 # Returning customer — update last_seen only.
                 await db.table("customers").update({
@@ -164,6 +173,13 @@ async def handle_inbound_message(
                 logger.debug(
                     f"Returning customer last_seen updated: {phone_number}"
                 )
+                # Sync to Sheets (fire-and-forget)
+                updated_customer = {**customer_row, "last_seen": _now}
+                asyncio.create_task(sync_customer_to_sheets(
+                    client_id=client_id,
+                    client_config=client_config,
+                    customer_data=updated_customer,
+                ))
         except Exception as e:
             logger.error(
                 f"Failed to upsert customer record for {phone_number}: {e}",

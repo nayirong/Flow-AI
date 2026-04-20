@@ -1,7 +1,7 @@
 # Flow AI — Project Status Log
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-19
+> Last Updated: 2026-04-20
 
 ---
 
@@ -21,7 +21,7 @@
 | Supabase (shared flowai-platform) | Live | Tables created: `api_incidents`, `api_usage`, `clients`. HeyAircon row inserted with Meta phone ID, verify token, human agent number, Google Calendar ID. |
 | Meta webhook | Live | Webhook URL registered and verified with Meta. Real WhatsApp traffic being processed. |
 | Python orchestration engine | Live in Production | End-to-end flow confirmed: inbound logged → escalation gate → context builder → Claude Haiku 4.5 → reply via Meta API. |
-| Google Calendar integration | Blocked | Suspected Google Calendar API not enabled in GCP project `agent-heyaircon`. Service account has been shared but events not appearing. User needs to enable Calendar API in GCP Console for project `agent-heyaircon`. |
+| Google Calendar integration | Working | Calendar API issue resolved in prior session. Integration confirmed operational. |
 | hey-aircon website | Built | Static HTML site at clients/hey-aircon/website/ |
 | AGENTS.md | Current | Last updated 2026-04-18 |
 | .claude/CLAUDE.md | Current | Last updated 2026-04-19 |
@@ -37,23 +37,25 @@
 | A: Webhook + Meta integration | Complete | Railway running; Meta webhook verified live 2026-04-19 |
 | B: Escalation gate | Complete | Binary gate with holding reply on TRUE branch |
 | C: AI Agent (Claude Haiku 4.5 + context builder) | Complete | Context engineering working; Config + Policies via Supabase |
-| D: Booking tools (calendar + write_booking) | Live (partial) | `check_calendar` and `create_event` operational; `write_booking` blocked on Google Calendar 404 (service account access not granted) |
-| E: Escalate-to-human tool | Not Started | Awaiting Google Calendar fix and 48h production verification |
+| D: Booking tools (calendar + write_booking) | Live | `check_calendar`, `create_event`, and `write_booking` all operational. Google Calendar integration confirmed working. |
+| E: Escalate-to-human tool | Not Started | Next to build. No outstanding blockers. |
 | Supabase (shared platform) | Complete | Tables provisioned; HeyAircon row live |
 | Meta dev account | Complete | Webhook verified, real traffic flowing as of 2026-04-19 |
-| Google Calendar fix | Pending User Action | Enable Google Calendar API in GCP Console for project `agent-heyaircon`. Service account already shared — API enablement is the suspected missing step. |
+| Google Calendar integration | Working | Resolved in prior session. |
 | Per-client LLM keys | Complete | `ClientConfig` carries `anthropic_api_key` and `openai_api_key` from Railway env vars. Shared platform `ANTHROPIC_API_KEY` removed. |
-| Go-live / 48h verification | In Progress | Engine live as of 2026-04-19; monitoring for 48h before n8n decommission decision |
+| Go-live / Production release | Scheduled — End April 2026 | Engine live in development. Production release target: end of April 2026. Time allows for thorough edge case testing. |
+| Google Sheets sync (client data visibility) | Complete | Requirements: `docs/requirements/google_sheets_sync.md`. Architecture: `docs/architecture/google_sheets_sync.md`. Test plan: `docs/test-plan/features/google_sheets_sync.md`. Implementation: `engine/integrations/google_sheets.py`. 13 tests passing (8 unit + 5 integration). 2026-04-20. |
+| Address schema migration (`address` + `postal_code` → `bookings`) | In Progress — Architecture | Schema change approved 2026-04-20. Move fields from `customers` to `bookings` for per-booking address accuracy. `@software-architect` dispatched to produce decision record and migration steps. |
 
 ### Platform — Multi-client Engine Migration
 
 | Item | Status | Notes |
 |------|--------|-------|
-| n8n → Python orchestration engine | Live in Production | Real WhatsApp traffic processed 2026-04-19 |
+| n8n → Python orchestration engine | Live in Development | Python engine running; real traffic being processed. Production release target end April 2026. n8n was not in production — parallel run characterization corrected. |
 | docs/ folder structure | Complete | Established earlier in project lifecycle |
 | .claude/CLAUDE.md | Current | Blockers and migration status updated 2026-04-19 |
 | Architecture doc (`00_platform_architecture.md`) | Stale — Needs Update | Two drifts identified: (1) `run_agent()` signature in doc uses `client_config: ClientConfig` but implementation uses explicit `anthropic_api_key` + `openai_api_key` + `client_id` params; (2) `LLM_PROVIDER=github_models` eval shim not documented. Delegated to `@software-architect`. |
-| n8n decommission | Pending | Awaiting 48h production verification + Google Calendar fix confirmation |
+| n8n decommission | Not a Gate | n8n was not running in production. Not a blocker for production release. Decommission at founder's discretion. |
 
 ---
 
@@ -85,6 +87,8 @@
 
 | Date | Event |
 |------|-------|
+| 2026-04-20 | Status corrections applied: (1) Google Calendar integration confirmed working — removed as blocker. (2) n8n was not in production — removed as decommission gate. (3) Production release target set: end April 2026. Address schema migration approved and in-flight: `@software-architect` dispatched to produce decision record and migration steps for moving `address` + `postal_code` from `customers` to `bookings`. |
+| 2026-04-20 | Change request evaluated: move `address` + `postal_code` from `customers` table to `bookings` table. Decision: APPROVED — valid data model fix. Original deferral (48h verification gate) removed; no outstanding blockers. Architecture phase now in progress. |
 | 2026-04-19 | Post-session doc review completed. Architecture doc drifts identified: `run_agent()` signature (doc uses `client_config: ClientConfig`; impl uses explicit key params) and `LLM_PROVIDER=github_models` eval shim not documented. Delegated to `@software-architect` for targeted update. `booking_tools.py` hardening confirmed: `write_booking()` now raises `RuntimeError` on missing Calendar creds; atomicity enforced (no DB write without calendar event); human agent alerted on failure. `context_builder.py` prompt fix confirmed: 7 explicit BOOKING RULES replacing vague confirmation block. Google Calendar blocker re-classified: suspected GCP API not enabled (not just service account sharing). |
 | 2026-04-19 | Code map created: `docs/architecture/code_map.md` — living quick-reference mapping every `engine/` file to its role in the end-to-end message flow, Supabase data flow, and "where to look" developer routing table. `AGENTS.md` and `.claude/CLAUDE.md` updated with routing entry and hard rule to keep code map current. |
 | 2026-04-19 | Python engine confirmed live in production. Meta webhook verified and receiving real WhatsApp traffic for HeyAircon. Per-client LLM keys (`{CLIENT_ID_UPPER}_ANTHROPIC_API_KEY`, `{CLIENT_ID_UPPER}_OPENAI_API_KEY`) implemented in `ClientConfig`; shared `ANTHROPIC_API_KEY` removed from `Settings`. Shared Supabase (`flowai-platform`) fully provisioned with `api_incidents`, `api_usage`, `clients` tables; HeyAircon row live. `status_log.md` and `.claude/CLAUDE.md` updated. |

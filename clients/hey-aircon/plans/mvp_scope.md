@@ -170,7 +170,7 @@ Three Postgres reads, three Sheets overwrites. No bidirectional sync, no conflic
 
 ### Supabase Table Schemas
 
-**`bookings`**
+**`bookings`** — post-Phase-3 target schema (address fields moved here from `customers`)
 ```sql
 CREATE TABLE bookings (
   id              SERIAL PRIMARY KEY,
@@ -184,18 +184,21 @@ CREATE TABLE bookings (
   slot_window     TEXT,                           -- AM or PM
   calendar_event_id TEXT,
   booking_status  TEXT DEFAULT 'Confirmed',
+  address         TEXT,                           -- job location for this booking (moved from customers)
+  postal_code     TEXT,                           -- postal code for this booking (moved from customers)
   notes           TEXT
 );
 ```
 
-**`customers`**
+**`customers`** — post-Phase-3 target schema (`address` and `postal_code` removed)
+
+> NOTE: As of 2026-04-20, the live `customers` table still contains `address TEXT` and `postal_code TEXT` columns. These are scheduled for removal in Phase 3 of the address schema migration (see `docs/architecture/address_schema_migration.md`). The DDL below reflects the target state after Phase 3 cleanup is executed. Do not use these columns in new code.
+
 ```sql
 CREATE TABLE customers (
   id              SERIAL PRIMARY KEY,
   phone_number    TEXT UNIQUE NOT NULL,           -- primary key / foreign key from bookings
   customer_name   TEXT,
-  address         TEXT,
-  postal_code     TEXT,
   first_seen      TIMESTAMPTZ DEFAULT NOW(),
   last_seen       TIMESTAMPTZ DEFAULT NOW(),
   total_bookings  INTEGER DEFAULT 0,
@@ -736,7 +739,7 @@ Keyed by phone number. Window: last 20 messages. Persists across n8n restarts.
 
 > All five tables live in the `heyaircon` Supabase project. Full schema definitions with SQL are in the **Stack Migration** section above. This section is a summary reference.
 
-**`bookings`** — one row per booking, written by agent tools
+**`bookings`** — one row per booking, written by agent tools (post-Phase-3 target schema)
 
 | Column | Description | Written by |
 |--------|-------------|------------|
@@ -750,6 +753,8 @@ Keyed by phone number. Window: last 20 messages. Persists across n8n restarts.
 | slot_window | AM or PM | Agent tool |
 | calendar_event_id | Google Calendar event ID | `create_calendar_event` tool |
 | booking_status | Confirmed / Escalated / Cancelled | Agent tool + human (manual in Studio) |
+| address | Job location for this specific booking | Agent tool (required — collected before `write_booking()` call) |
+| postal_code | Postal code for this specific booking | Agent tool (required — collected before `write_booking()` call) |
 | escalation_flag | TRUE/FALSE — pauses agent | `escalate_to_human` tool; cleared manually in Studio |
 | escalation_reason | conflict / change_request / out_of_scope | `escalate_to_human` tool |
 | notes | Admin notes | Manual in Studio |
@@ -764,14 +769,14 @@ Keyed by phone number. Window: last 20 messages. Persists across n8n restarts.
 | message_text | |
 | message_type | text / image / other |
 
-**`customers`** — one row per customer, upserted on every booking
+**`customers`** — one row per customer, upserted on every booking (post-Phase-3 target schema — `address` and `postal_code` removed)
+
+> NOTE: The live table currently still contains `address` and `postal_code` columns. These are pending Phase 3 cleanup. Do not write new code that reads or writes these columns on `customers`. See `docs/architecture/address_schema_migration.md`.
 
 | Column | Description | Written by |
 |--------|-------------|------------|
 | phone_number | Primary key | Agent tool |
 | customer_name | Full name | Agent tool |
-| address | Most recent address provided | Agent tool |
-| postal_code | Most recent postal code | Agent tool |
 | first_seen | First interaction timestamp | Agent tool (create only) |
 | last_seen | Most recent interaction | Agent tool |
 | total_bookings | Booking count | Agent tool (incremented) |
