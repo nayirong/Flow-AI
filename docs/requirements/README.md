@@ -8,6 +8,7 @@ This directory contains formal requirements documents produced by the product-ma
 | Feature | File | Status | Created |
 |---------|------|--------|---------|
 | Evaluation Pipeline | [eval_pipeline.md](eval_pipeline.md) | Approved — Ready for Architecture Phase | 2026-04-16 |
+| Service Variations — Agent Clarification Flow | [service_variations.md](service_variations.md) | Draft — Pending Founder Approval | 2026-04-19 |
 | HeyAircon Phase 1 | `hey-aircon-requirements.md` | To-do | — |
 
 ### Expected files
