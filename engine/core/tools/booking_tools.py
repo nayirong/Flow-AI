@@ -11,7 +11,7 @@ import string
 from datetime import datetime, timezone
 from typing import Optional
 
-from engine.integrations.google_sheets import sync_booking_to_sheets
+from engine.integrations.google_sheets import sync_booking_to_sheets, sync_customer_to_sheets
 
 logger = logging.getLogger(__name__)
 
@@ -272,12 +272,19 @@ async def write_booking(
             "customer_name": customer_name,
             "booking_count": current_count + 1,
         }
-        await (
+        update_result = await (
             db.table("customers")
             .update(customer_update)
             .eq("phone_number", phone_number)
             .execute()
         )
+        # Sync updated customer (with new booking_count) to Sheets
+        if update_result.data:
+            asyncio.create_task(sync_customer_to_sheets(
+                client_id=client_config.client_id,
+                client_config=client_config,
+                customer_data=update_result.data[0],
+            ))
     except Exception as e:
         # Non-fatal — booking row already written.
         logger.warning(
