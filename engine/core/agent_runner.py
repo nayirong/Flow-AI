@@ -302,10 +302,12 @@ async def run_agent(
     active_provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     fallback_enabled = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() != "false"
 
-    # Guardrail: tracks whether write_booking completed successfully this invocation.
-    # If the agent produces confirmation language without a successful write_booking,
-    # the response is intercepted. One re-prompt attempt is injected to recover;
-    # if the agent still skips write_booking, the safe fallback is returned.
+    # Guardrail: tracks booking tool state for this invocation.
+    # The confirmation guardrail only activates when check_calendar_availability
+    # has succeeded — i.e., we are genuinely in the booking confirmation phase.
+    # This prevents false positives from casual confirmation language ("all set",
+    # "confirmed") used in non-booking conversational contexts.
+    calendar_check_succeeded = False
     booking_write_succeeded = False
     _booking_reprompt_used = False
 
@@ -412,9 +414,12 @@ async def run_agent(
                 f"chars={len(final_text)})"
             )
 
-            # Guardrail: if the agent claims to have confirmed a booking but
-            # write_booking never succeeded, attempt one re-prompt to recover.
-            if not booking_write_succeeded and _contains_booking_confirmation(final_text):
+            # Guardrail: only active when check_calendar_availability succeeded this
+            # invocation (i.e., we are in the booking confirmation phase). Prevents
+            # false positives from casual confirmation language in non-booking turns.
+            if (calendar_check_succeeded
+                    and not booking_write_succeeded
+                    and _contains_booking_confirmation(final_text)):
                 if not _booking_reprompt_used:
                     _booking_reprompt_used = True
                     logger.warning(
@@ -422,6 +427,12 @@ async def run_agent(
                         "injecting re-prompt to recover.",
                         iteration + 1,
                         client_id,
+                    )
+                    await log_incident(
+                        provider="agent_guardrail",
+                        error_type="guardrail_reprompt_injected",
+                        error_message=f"Agent skipped write_booking at iter={iteration + 1}. Re-prompt injected.",
+                        client_id=client_id,
                     )
                     # Append the agent's premature confirmation as assistant turn,
                     # then inject a correction as a user turn so Claude calls write_booking.
@@ -446,6 +457,12 @@ async def run_agent(
                     iteration + 1,
                     client_id,
                 )
+                await log_incident(
+                    provider="agent_guardrail",
+                    error_type="guardrail_fired",
+                    error_message=f"write_booking not called after re-prompt at iter={iteration + 1}. Fallback returned to customer.",
+                    client_id=client_id,
+                )
                 return _BOOKING_GUARDRAIL_FALLBACK
 
             return final_text or _FALLBACK_RESPONSE
@@ -468,8 +485,16 @@ async def run_agent(
                     )
                     tool_results.append(tool_result)
 
-                    # Guardrail tracking: mark write_booking as succeeded only when
-                    # the tool returned a booking_id without an error key.
+                    # Guardrail tracking: record calendar check and write_booking outcomes.
+                    if getattr(block, "name", None) == "check_calendar_availability":
+                        try:
+                            result_data = json.loads(tool_result["content"])
+                            if "error" not in result_data:
+                                calendar_check_succeeded = True
+                                logger.info("check_calendar_availability succeeded")
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
                     if getattr(block, "name", None) == "write_booking":
                         try:
                             result_data = json.loads(tool_result["content"])
@@ -479,6 +504,14 @@ async def run_agent(
                                     "write_booking succeeded (booking_id=%s)",
                                     result_data["booking_id"],
                                 )
+                                if _booking_reprompt_used:
+                                    # Re-prompt triggered the recovery — log it
+                                    await log_incident(
+                                        provider="agent_guardrail",
+                                        error_type="guardrail_reprompt_success",
+                                        error_message=f"write_booking succeeded after re-prompt (booking_id={result_data['booking_id']}).",
+                                        client_id=client_id,
+                                    )
                         except (json.JSONDecodeError, TypeError):
                             pass
 

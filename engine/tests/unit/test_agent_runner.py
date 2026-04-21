@@ -296,31 +296,68 @@ async def test_model_name_override(monkeypatch):
 @pytest.mark.asyncio
 @patch("engine.core.agent_runner._get_llm_client")
 @patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
-async def test_guardrail_fires_when_write_booking_not_called(mock_call_llm, mock_get_client):
+async def test_guardrail_no_false_positive_without_calendar_check(mock_call_llm, mock_get_client):
     """
-    Agent skips write_booking and returns confirmation language.
-    Guardrail injects a re-prompt (1 extra LLM call). Agent still skips write_booking.
-    Guardrail fires on the second attempt and returns the safe fallback.
+    Agent returns confirmation-like language but check_calendar_availability was
+    never called (non-booking conversational turn). Guardrail must NOT fire.
     """
     from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
 
-    # Both calls: agent skips tools and goes straight to confirmation
-    mock_call_llm.return_value = _end_turn_response(
-        "Your booking is confirmed for 30 April AM. See you on the day!"
+    casual_text = "No worries, all set — let me know which service you'd like!"
+    mock_call_llm.return_value = _end_turn_response(casual_text)
+
+    result = await run_agent(
+        system_message="Sys.",
+        conversation_history=[],
+        current_message="I am not sure about the BTU.",
+        tool_definitions=[],
+        tool_dispatch={},
     )
+
+    # No calendar check → guardrail inactive → response passes through unchanged
+    assert result == casual_text
+    assert result != _BOOKING_GUARDRAIL_FALLBACK
+    assert mock_call_llm.call_count == 1
+
+
+@pytest.mark.asyncio
+@patch("engine.core.agent_runner._get_llm_client")
+@patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
+async def test_guardrail_fires_when_write_booking_not_called(mock_call_llm, mock_get_client):
+    """
+    Agent calls check_calendar_availability (calendar phase entered), then skips
+    write_booking and returns confirmation language.
+    Guardrail injects a re-prompt. Agent still skips write_booking.
+    Guardrail fires and returns the safe fallback.
+    """
+    from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
+
+    # Sequence: calendar checked → agent skips write_booking and says confirmed
+    # → re-prompt injected → agent says confirmed again → fallback
+    calendar_resp = _tool_use_response(
+        tool_name="check_calendar_availability",
+        tool_id="tool_cal_001",
+        tool_input={"date": "2026-04-30", "timezone": "Asia/Singapore"},
+    )
+    confirmation_text = "Your booking is confirmed for 30 April AM. See you on the day!"
+    end_resp = _end_turn_response(confirmation_text)
+
+    mock_call_llm.side_effect = [calendar_resp, end_resp, end_resp]
+
+    async def mock_check_calendar(**kwargs):
+        return {"am_available": True, "pm_available": False}
 
     result = await run_agent(
         system_message="Sys.",
         conversation_history=[],
         current_message="Book me for 30 April AM.",
-        tool_definitions=[],
-        tool_dispatch={},
+        tool_definitions=[{"name": "check_calendar_availability"}],
+        tool_dispatch={"check_calendar_availability": mock_check_calendar},
     )
 
     assert result == _BOOKING_GUARDRAIL_FALLBACK
-    # First call: confirmation without write_booking → re-prompt injected
-    # Second call: still no write_booking → guardrail fires, fallback returned
-    assert mock_call_llm.call_count == 2
+    # call 1: calendar tool → call 2: premature confirm → re-prompt → call 3: still no write_booking → fallback
+    assert mock_call_llm.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -328,12 +365,17 @@ async def test_guardrail_fires_when_write_booking_not_called(mock_call_llm, mock
 @patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
 async def test_guardrail_passes_when_write_booking_succeeded(mock_call_llm, mock_get_client):
     """
-    Agent calls write_booking (returns a booking_id), then returns confirmation language.
-    Guardrail must NOT intercept — the confirmation is legitimate.
+    Agent calls check_calendar_availability then write_booking (returns a booking_id),
+    then returns confirmation language. Guardrail must NOT intercept.
     """
     from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
 
-    tool_resp = _tool_use_response(
+    calendar_resp = _tool_use_response(
+        tool_name="check_calendar_availability",
+        tool_id="tool_cal_002",
+        tool_input={"date": "2026-04-30", "timezone": "Asia/Singapore"},
+    )
+    write_resp = _tool_use_response(
         tool_name="write_booking",
         tool_id="tool_wb_001",
         tool_input={"service_type": "Aircon Chemical Wash", "slot_date": "2026-04-30"},
@@ -341,7 +383,10 @@ async def test_guardrail_passes_when_write_booking_succeeded(mock_call_llm, mock
     confirmation_text = "Your booking is confirmed for 30 April AM. See you on the day!"
     end_resp = _end_turn_response(confirmation_text)
 
-    mock_call_llm.side_effect = [tool_resp, end_resp]
+    mock_call_llm.side_effect = [calendar_resp, write_resp, end_resp]
+
+    async def mock_check_calendar(**kwargs):
+        return {"am_available": True, "pm_available": False}
 
     async def mock_write_booking(**kwargs):
         return {"booking_id": "BK-2026-001", "status": "confirmed"}
@@ -350,14 +395,16 @@ async def test_guardrail_passes_when_write_booking_succeeded(mock_call_llm, mock
         system_message="Sys.",
         conversation_history=[],
         current_message="Book me for 30 April AM.",
-        tool_definitions=[{"name": "write_booking"}],
-        tool_dispatch={"write_booking": mock_write_booking},
+        tool_definitions=[{"name": "check_calendar_availability"}, {"name": "write_booking"}],
+        tool_dispatch={
+            "check_calendar_availability": mock_check_calendar,
+            "write_booking": mock_write_booking,
+        },
     )
 
-    # Confirmation should pass through — write_booking succeeded
     assert result == confirmation_text
     assert result != _BOOKING_GUARDRAIL_FALLBACK
-    assert mock_call_llm.call_count == 2
+    assert mock_call_llm.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -365,22 +412,28 @@ async def test_guardrail_passes_when_write_booking_succeeded(mock_call_llm, mock
 @patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
 async def test_guardrail_fires_when_write_booking_returns_error(mock_call_llm, mock_get_client):
     """
-    Agent calls write_booking but it returns an error (no booking_id).
-    Agent then returns confirmation language — guardrail re-prompts once,
-    agent still skips write_booking, so guardrail fires and returns fallback.
+    Agent calls check_calendar_availability then write_booking, but write_booking
+    returns an error. Agent then returns confirmation language — guardrail re-prompts
+    once, agent still skips write_booking, so guardrail fires and returns fallback.
     """
     from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
 
-    tool_resp = _tool_use_response(
+    calendar_resp = _tool_use_response(
+        tool_name="check_calendar_availability",
+        tool_id="tool_cal_003",
+        tool_input={"date": "2026-04-30", "timezone": "Asia/Singapore"},
+    )
+    write_resp = _tool_use_response(
         tool_name="write_booking",
         tool_id="tool_wb_002",
         tool_input={"service_type": "Aircon Service", "slot_date": "2026-04-30"},
     )
-    # After tool error, agent wrongly says confirmed.
-    # After re-prompt, agent says confirmed again without calling write_booking.
     end_resp = _end_turn_response("Your booking is confirmed!")
 
-    mock_call_llm.side_effect = [tool_resp, end_resp, end_resp]
+    mock_call_llm.side_effect = [calendar_resp, write_resp, end_resp, end_resp]
+
+    async def mock_check_calendar(**kwargs):
+        return {"am_available": True, "pm_available": False}
 
     async def mock_write_booking_fail(**kwargs):
         return {"error": "calendar_unavailable", "message": "Could not create calendar event"}
@@ -389,8 +442,11 @@ async def test_guardrail_fires_when_write_booking_returns_error(mock_call_llm, m
         system_message="Sys.",
         conversation_history=[],
         current_message="Book me for 30 April AM.",
-        tool_definitions=[{"name": "write_booking"}],
-        tool_dispatch={"write_booking": mock_write_booking_fail},
+        tool_definitions=[{"name": "check_calendar_availability"}, {"name": "write_booking"}],
+        tool_dispatch={
+            "check_calendar_availability": mock_check_calendar,
+            "write_booking": mock_write_booking_fail,
+        },
     )
 
     assert result == _BOOKING_GUARDRAIL_FALLBACK
@@ -401,18 +457,24 @@ async def test_guardrail_fires_when_write_booking_returns_error(mock_call_llm, m
 @patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
 async def test_guardrail_reprompt_recovers_booking(mock_call_llm, mock_get_client):
     """
-    Agent skips write_booking on first attempt (confirmation language detected).
-    Guardrail injects re-prompt. On second attempt agent calls write_booking and
-    returns confirmation — this should pass through cleanly.
+    Agent calls check_calendar_availability, then skips write_booking (confirmation
+    language detected). Guardrail injects re-prompt. On retry agent calls write_booking
+    successfully — confirmation passes through cleanly.
     """
     from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
 
     confirmation_text = "Your booking is confirmed! Reference: BK-2026-002."
 
     # Sequence:
-    # 1. end_turn with confirmation but no write_booking → re-prompt injected
-    # 2. tool_use: write_booking called
-    # 3. end_turn with confirmation — write_booking succeeded, passes through
+    # 1. tool_use: check_calendar_availability called
+    # 2. end_turn: premature confirmation (no write_booking) → re-prompt injected
+    # 3. tool_use: write_booking called
+    # 4. end_turn: confirmation — write_booking succeeded, passes through
+    calendar_resp = _tool_use_response(
+        tool_name="check_calendar_availability",
+        tool_id="tool_cal_004",
+        tool_input={"date": "2026-04-30", "timezone": "Asia/Singapore"},
+    )
     premature_confirm = _end_turn_response(confirmation_text)
     write_booking_call = _tool_use_response(
         tool_name="write_booking",
@@ -421,7 +483,10 @@ async def test_guardrail_reprompt_recovers_booking(mock_call_llm, mock_get_clien
     )
     final_confirm = _end_turn_response(confirmation_text)
 
-    mock_call_llm.side_effect = [premature_confirm, write_booking_call, final_confirm]
+    mock_call_llm.side_effect = [calendar_resp, premature_confirm, write_booking_call, final_confirm]
+
+    async def mock_check_calendar(**kwargs):
+        return {"am_available": True, "pm_available": False}
 
     async def mock_write_booking(**kwargs):
         return {"booking_id": "BK-2026-002", "status": "confirmed"}
@@ -430,10 +495,13 @@ async def test_guardrail_reprompt_recovers_booking(mock_call_llm, mock_get_clien
         system_message="Sys.",
         conversation_history=[],
         current_message="Book me for 30 April AM.",
-        tool_definitions=[{"name": "write_booking"}],
-        tool_dispatch={"write_booking": mock_write_booking},
+        tool_definitions=[{"name": "check_calendar_availability"}, {"name": "write_booking"}],
+        tool_dispatch={
+            "check_calendar_availability": mock_check_calendar,
+            "write_booking": mock_write_booking,
+        },
     )
 
     assert result == confirmation_text
     assert result != _BOOKING_GUARDRAIL_FALLBACK
-    assert mock_call_llm.call_count == 3
+    assert mock_call_llm.call_count == 4
