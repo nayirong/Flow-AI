@@ -298,12 +298,13 @@ async def test_model_name_override(monkeypatch):
 @patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
 async def test_guardrail_fires_when_write_booking_not_called(mock_call_llm, mock_get_client):
     """
-    Agent returns booking confirmation language but write_booking was never called.
-    Guardrail must intercept and return the safe fallback — NOT the confirmation.
+    Agent skips write_booking and returns confirmation language.
+    Guardrail injects a re-prompt (1 extra LLM call). Agent still skips write_booking.
+    Guardrail fires on the second attempt and returns the safe fallback.
     """
     from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
 
-    # Agent skips tools and goes straight to a confirmation reply
+    # Both calls: agent skips tools and goes straight to confirmation
     mock_call_llm.return_value = _end_turn_response(
         "Your booking is confirmed for 30 April AM. See you on the day!"
     )
@@ -317,7 +318,9 @@ async def test_guardrail_fires_when_write_booking_not_called(mock_call_llm, mock
     )
 
     assert result == _BOOKING_GUARDRAIL_FALLBACK
-    assert mock_call_llm.call_count == 1
+    # First call: confirmation without write_booking → re-prompt injected
+    # Second call: still no write_booking → guardrail fires, fallback returned
+    assert mock_call_llm.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -363,7 +366,8 @@ async def test_guardrail_passes_when_write_booking_succeeded(mock_call_llm, mock
 async def test_guardrail_fires_when_write_booking_returns_error(mock_call_llm, mock_get_client):
     """
     Agent calls write_booking but it returns an error (no booking_id).
-    Agent then returns confirmation language — guardrail must intercept.
+    Agent then returns confirmation language — guardrail re-prompts once,
+    agent still skips write_booking, so guardrail fires and returns fallback.
     """
     from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
 
@@ -372,9 +376,11 @@ async def test_guardrail_fires_when_write_booking_returns_error(mock_call_llm, m
         tool_id="tool_wb_002",
         tool_input={"service_type": "Aircon Service", "slot_date": "2026-04-30"},
     )
+    # After tool error, agent wrongly says confirmed.
+    # After re-prompt, agent says confirmed again without calling write_booking.
     end_resp = _end_turn_response("Your booking is confirmed!")
 
-    mock_call_llm.side_effect = [tool_resp, end_resp]
+    mock_call_llm.side_effect = [tool_resp, end_resp, end_resp]
 
     async def mock_write_booking_fail(**kwargs):
         return {"error": "calendar_unavailable", "message": "Could not create calendar event"}
@@ -388,3 +394,46 @@ async def test_guardrail_fires_when_write_booking_returns_error(mock_call_llm, m
     )
 
     assert result == _BOOKING_GUARDRAIL_FALLBACK
+
+
+@pytest.mark.asyncio
+@patch("engine.core.agent_runner._get_llm_client")
+@patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
+async def test_guardrail_reprompt_recovers_booking(mock_call_llm, mock_get_client):
+    """
+    Agent skips write_booking on first attempt (confirmation language detected).
+    Guardrail injects re-prompt. On second attempt agent calls write_booking and
+    returns confirmation — this should pass through cleanly.
+    """
+    from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
+
+    confirmation_text = "Your booking is confirmed! Reference: BK-2026-002."
+
+    # Sequence:
+    # 1. end_turn with confirmation but no write_booking → re-prompt injected
+    # 2. tool_use: write_booking called
+    # 3. end_turn with confirmation — write_booking succeeded, passes through
+    premature_confirm = _end_turn_response(confirmation_text)
+    write_booking_call = _tool_use_response(
+        tool_name="write_booking",
+        tool_id="tool_wb_003",
+        tool_input={"service_type": "Aircon Service", "slot_date": "2026-04-30"},
+    )
+    final_confirm = _end_turn_response(confirmation_text)
+
+    mock_call_llm.side_effect = [premature_confirm, write_booking_call, final_confirm]
+
+    async def mock_write_booking(**kwargs):
+        return {"booking_id": "BK-2026-002", "status": "confirmed"}
+
+    result = await run_agent(
+        system_message="Sys.",
+        conversation_history=[],
+        current_message="Book me for 30 April AM.",
+        tool_definitions=[{"name": "write_booking"}],
+        tool_dispatch={"write_booking": mock_write_booking},
+    )
+
+    assert result == confirmation_text
+    assert result != _BOOKING_GUARDRAIL_FALLBACK
+    assert mock_call_llm.call_count == 3

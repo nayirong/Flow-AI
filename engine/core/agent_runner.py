@@ -304,8 +304,10 @@ async def run_agent(
 
     # Guardrail: tracks whether write_booking completed successfully this invocation.
     # If the agent produces confirmation language without a successful write_booking,
-    # the response is intercepted and replaced with a safe fallback.
+    # the response is intercepted. One re-prompt attempt is injected to recover;
+    # if the agent still skips write_booking, the safe fallback is returned.
     booking_write_succeeded = False
+    _booking_reprompt_used = False
 
     # Build initial messages list: history + current inbound
     messages: list[dict] = list(conversation_history) + [
@@ -411,11 +413,36 @@ async def run_agent(
             )
 
             # Guardrail: if the agent claims to have confirmed a booking but
-            # write_booking never succeeded, intercept and return a safe fallback.
+            # write_booking never succeeded, attempt one re-prompt to recover.
             if not booking_write_succeeded and _contains_booking_confirmation(final_text):
+                if not _booking_reprompt_used:
+                    _booking_reprompt_used = True
+                    logger.warning(
+                        "GUARDRAIL: agent skipped write_booking (iter=%d, client_id=%s) — "
+                        "injecting re-prompt to recover.",
+                        iteration + 1,
+                        client_id,
+                    )
+                    # Append the agent's premature confirmation as assistant turn,
+                    # then inject a correction as a user turn so Claude calls write_booking.
+                    messages.append({
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": final_text}],
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[SYSTEM CORRECTION] You have not called write_booking yet. "
+                            "You must call write_booking before confirming the booking. "
+                            "Please call write_booking now with the details already collected."
+                        ),
+                    })
+                    continue
+
+                # Re-prompt was already tried — still no write_booking. Give up.
                 logger.warning(
-                    "GUARDRAIL FIRED: agent sent booking confirmation without successful "
-                    "write_booking (iter=%d, client_id=%s). Returning safe fallback.",
+                    "GUARDRAIL FIRED: write_booking still not called after re-prompt "
+                    "(iter=%d, client_id=%s). Returning safe fallback.",
                     iteration + 1,
                     client_id,
                 )
