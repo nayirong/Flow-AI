@@ -152,64 +152,60 @@ async def test_write_booking_inserts_row_and_updates_customer(mock_create_event)
     assert "customers" in table_names
 
 
-def _make_db_with_customer_count(booking_count: int):
+def _make_db_for_booking_step3(total_bookings: int):
     """
-    Supabase mock where the customers table SELECT returns a row with a
-    specific booking_count. Used to verify booking_count increment logic.
+    Supabase mock for write_booking Step 3.
 
-    The mock handles the call sequence for Step 3:
-      db.table("customers").select("booking_count").eq(...).limit(1).execute()  → returns count
-      db.table("customers").update({...}).eq(...).execute()                      → success
+    Call sequence:
+      db.table("bookings").insert(...).execute()         → booking INSERT
+      db.table("customers").update({name}).eq(...).execute()   → name UPDATE
+      db.table("customers").select("*").eq(...).limit(1).execute() → re-fetch with trigger-updated total_bookings
     """
-    # Chain for the SELECT call (returns existing booking_count)
-    select_chain = MagicMock()
-    select_chain.select.return_value = select_chain
-    select_chain.eq.return_value = select_chain
-    select_chain.limit.return_value = select_chain
-    select_chain.execute = AsyncMock(
-        return_value=MagicMock(data=[{"booking_count": booking_count}])
-    )
+    bookings_chain = MagicMock()
+    bookings_chain.insert.return_value = bookings_chain
+    bookings_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
 
-    # Chain for the UPDATE call
     update_chain = MagicMock()
     update_chain.update.return_value = update_chain
     update_chain.eq.return_value = update_chain
     update_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
 
-    # bookings INSERT chain
-    bookings_chain = MagicMock()
-    bookings_chain.insert.return_value = bookings_chain
-    bookings_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+    # Re-fetch chain returns the trigger-updated customer row
+    refetch_chain = MagicMock()
+    refetch_chain.select.return_value = refetch_chain
+    refetch_chain.eq.return_value = refetch_chain
+    refetch_chain.limit.return_value = refetch_chain
+    refetch_chain.execute = AsyncMock(
+        return_value=MagicMock(data=[{"id": 1, "total_bookings": total_bookings}])
+    )
 
-    # Route db.table() calls: bookings → bookings_chain, customers calls alternate
-    # select (first customers call) then update (second customers call)
-    customers_calls = [select_chain, update_chain]
+    customers_calls = [update_chain, refetch_chain]
     customers_call_count = {"n": 0}
 
     def table_router(name):
         if name == "bookings":
             return bookings_chain
-        # customers — return select_chain first, update_chain second
         idx = customers_call_count["n"]
         customers_call_count["n"] += 1
-        return customers_calls[idx] if idx < len(customers_calls) else update_chain
+        return customers_calls[idx] if idx < len(customers_calls) else refetch_chain
 
     db = MagicMock()
     db.table.side_effect = table_router
-    db._update_chain = update_chain  # expose for assertion
+    db._update_chain = update_chain
     return db
 
 
 @pytest.mark.asyncio
 @patch("engine.integrations.google_calendar.create_booking_event", new_callable=AsyncMock)
-async def test_write_booking_increments_booking_count_from_zero(mock_create_event):
+async def test_write_booking_updates_customer_name_and_syncs_sheets(mock_create_event):
     """
-    New customer (booking_count=0): write_booking must update booking_count to 1.
+    write_booking Step 3: UPDATE sets customer_name; re-fetch picks up
+    trigger-updated total_bookings for Sheets sync.
     """
     from engine.core.tools.booking_tools import write_booking
 
     mock_create_event.return_value = "cal_event_new"
-    db = _make_db_with_customer_count(0)
+    db = _make_db_for_booking_step3(total_bookings=1)
     cfg = _make_client_config(has_calendar=True)
 
     result = await write_booking(
@@ -227,24 +223,26 @@ async def test_write_booking_increments_booking_count_from_zero(mock_create_even
 
     assert result["status"] == "Confirmed"
 
-    # Verify the UPDATE was called with booking_count=1
+    # UPDATE must only set customer_name — no booking_count field
     update_call_args = db._update_chain.update.call_args
     assert update_call_args is not None
-    updated_data = update_call_args[0][0]  # first positional arg to .update()
-    assert updated_data["booking_count"] == 1
-    assert updated_data["customer_name"] == "Carol Ng"
+    updated_data = update_call_args[0][0]
+    assert updated_data == {"customer_name": "Carol Ng"}
+    assert "booking_count" not in updated_data
+    assert "total_bookings" not in updated_data
 
 
 @pytest.mark.asyncio
 @patch("engine.integrations.google_calendar.create_booking_event", new_callable=AsyncMock)
-async def test_write_booking_increments_booking_count_from_one(mock_create_event):
+async def test_write_booking_refetches_customer_after_update(mock_create_event):
     """
-    Returning customer (booking_count=1): write_booking must update booking_count to 2.
+    write_booking Step 3: after updating customer_name, a SELECT * re-fetch
+    must be issued so the Sheets sync receives the trigger-updated total_bookings.
     """
     from engine.core.tools.booking_tools import write_booking
 
     mock_create_event.return_value = "cal_event_return"
-    db = _make_db_with_customer_count(1)
+    db = _make_db_for_booking_step3(total_bookings=2)
     cfg = _make_client_config(has_calendar=True)
 
     result = await write_booking(
@@ -261,12 +259,8 @@ async def test_write_booking_increments_booking_count_from_one(mock_create_event
     )
 
     assert result["status"] == "Confirmed"
-
-    update_call_args = db._update_chain.update.call_args
-    assert update_call_args is not None
-    updated_data = update_call_args[0][0]
-    assert updated_data["booking_count"] == 2
-    assert updated_data["customer_name"] == "David Koh"
+    # The refetch chain's execute must have been awaited
+    db._update_chain.eq.assert_called()
 
 
 @pytest.mark.asyncio

@@ -253,37 +253,30 @@ async def write_booking(
         )
         raise
 
-    # ── Step 3: Update customer record (name + increment booking_count) ─────────
-    # Fetch current booking_count first — supabase-py does not support arithmetic
-    # expressions in UPDATE, so we read then write. Safe for Phase 1 volumes.
+    # ── Step 3: Update customer name + sync to Sheets ────────────────────────────
+    # total_bookings is maintained by a Supabase DB trigger on booking INSERT.
+    # Re-fetch the customer after the booking row is written so the Sheets sync
+    # receives the trigger-updated count, not the pre-booking value.
     try:
-        customer_result = await (
+        await (
             db.table("customers")
-            .select("booking_count")
+            .update({"customer_name": customer_name})
+            .eq("phone_number", phone_number)
+            .execute()
+        )
+        # Re-fetch to pick up trigger-updated total_bookings
+        refreshed = await (
+            db.table("customers")
+            .select("*")
             .eq("phone_number", phone_number)
             .limit(1)
             .execute()
         )
-        current_count = 0
-        if customer_result.data:
-            current_count = customer_result.data[0].get("booking_count") or 0
-
-        customer_update: dict = {
-            "customer_name": customer_name,
-            "booking_count": current_count + 1,
-        }
-        update_result = await (
-            db.table("customers")
-            .update(customer_update)
-            .eq("phone_number", phone_number)
-            .execute()
-        )
-        # Sync updated customer (with new booking_count) to Sheets
-        if update_result.data:
+        if refreshed.data:
             asyncio.create_task(sync_customer_to_sheets(
                 client_id=client_config.client_id,
                 client_config=client_config,
-                customer_data=update_result.data[0],
+                customer_data=refreshed.data[0],
             ))
     except Exception as e:
         # Non-fatal — booking row already written.

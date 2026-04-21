@@ -62,7 +62,7 @@ async def test_empty_sheet_writes_header_and_row():
         "customer_name": "John Doe",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-02T00:00:00Z",
-        "booking_count": 3,
+        "total_bookings": 3,
         "escalation_flag": False,
     }
     
@@ -103,7 +103,7 @@ async def test_new_row_appended():
         "customer_name": "Jane Doe",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-02T00:00:00Z",
-        "booking_count": 1,
+        "total_bookings": 1,
         "escalation_flag": True,
     }
     
@@ -143,7 +143,7 @@ async def test_existing_row_updated():
         "customer_name": "Updated Name",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-03T00:00:00Z",
-        "booking_count": 5,
+        "total_bookings": 5,
         "escalation_flag": False,
     }
     
@@ -172,7 +172,7 @@ async def test_existing_row_updated():
     updated_row = mock_worksheet.update.call_args[0][1][0]
     assert updated_row[2] == "Updated Name"
     assert updated_row[4] == "2026-01-03 08:00 SGT"  # last_seen converted to SGT
-    assert updated_row[5] == "5"  # booking_count
+    assert updated_row[5] == "5"  # total_bookings
     
     mock_worksheet.append_row.assert_not_called()
 
@@ -187,7 +187,7 @@ async def test_multiple_matches_updates_first_logs_warning():
         "customer_name": "Updated",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-04T00:00:00Z",
-        "booking_count": 10,
+        "total_bookings": 10,
         "escalation_flag": False,
     }
     

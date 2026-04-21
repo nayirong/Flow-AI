@@ -91,7 +91,7 @@ def _customer_to_row(data: dict) -> list:
         str(data.get("customer_name", "")),
         _to_sgt(data.get("first_seen", "")),
         _to_sgt(data.get("last_seen", "")),
-        str(data.get("booking_count", 0)),
+        str(data.get("total_bookings", 0)),
         "TRUE" if data.get("escalation_flag") else "FALSE",
         str(data.get("notes", "") or ""),
         str(data.get("escalation_reason", "") or ""),
