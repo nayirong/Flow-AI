@@ -253,11 +253,25 @@ async def write_booking(
         )
         raise
 
-    # ── Step 3: Update customer record with name/address captured in this flow ─
-    customer_update: dict = {
-        "customer_name": customer_name,
-    }
+    # ── Step 3: Update customer record (name + increment booking_count) ─────────
+    # Fetch current booking_count first — supabase-py does not support arithmetic
+    # expressions in UPDATE, so we read then write. Safe for Phase 1 volumes.
     try:
+        customer_result = await (
+            db.table("customers")
+            .select("booking_count")
+            .eq("phone_number", phone_number)
+            .limit(1)
+            .execute()
+        )
+        current_count = 0
+        if customer_result.data:
+            current_count = customer_result.data[0].get("booking_count") or 0
+
+        customer_update: dict = {
+            "customer_name": customer_name,
+            "booking_count": current_count + 1,
+        }
         await (
             db.table("customers")
             .update(customer_update)

@@ -39,15 +39,35 @@ def _make_split_db():
 
     db.table routes by table name so the caller can independently inspect
     what was passed to bookings INSERT vs customers UPDATE.
+
+    Step 3 of write_booking now makes TWO calls to db.table("customers"):
+      1. SELECT booking_count (read current count)
+      2. UPDATE customer_name + booking_count (write incremented count)
+
+    customers_chain supports both: select() chains to execute() that returns
+    data=[{"booking_count": 0}], and update() chains to execute() that succeeds.
+    Both paths share the same chain object via MagicMock chaining — only the
+    update() call_args is inspected in assertions.
     """
     bookings_chain = MagicMock()
     bookings_chain.insert.return_value = bookings_chain
     bookings_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
 
+    # customers_chain must support both SELECT and UPDATE paths.
+    # - SELECT path: .select().eq().limit().execute() → data=[{"booking_count": 0}]
+    # - UPDATE path: .update().eq().execute()         → data=[]
+    # MagicMock chaining: all intermediate calls return the same object.
     customers_chain = MagicMock()
+    customers_chain.select.return_value = customers_chain
     customers_chain.update.return_value = customers_chain
     customers_chain.eq.return_value = customers_chain
-    customers_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+    customers_chain.limit.return_value = customers_chain
+    customers_chain.execute = AsyncMock(
+        side_effect=[
+            MagicMock(data=[{"booking_count": 0}]),  # SELECT call
+            MagicMock(data=[]),                       # UPDATE call
+        ]
+    )
 
     db = MagicMock()
     db.table.side_effect = (
@@ -387,10 +407,20 @@ async def test_tc12_customer_update_failure_is_non_fatal(mock_create_event):
     bookings_chain.insert.return_value = bookings_chain
     bookings_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
 
+    # Step 3 now does: SELECT booking_count first, then UPDATE.
+    # The SELECT must succeed (returns current count) so the code reaches the UPDATE.
+    # The UPDATE raises — that is the failure we are testing.
     customers_chain = MagicMock()
+    customers_chain.select.return_value = customers_chain
     customers_chain.update.return_value = customers_chain
     customers_chain.eq.return_value = customers_chain
-    customers_chain.execute = AsyncMock(side_effect=Exception("DB write failed"))
+    customers_chain.limit.return_value = customers_chain
+    customers_chain.execute = AsyncMock(
+        side_effect=[
+            MagicMock(data=[{"booking_count": 0}]),  # SELECT succeeds
+            Exception("DB write failed"),             # UPDATE fails — this is what we test
+        ]
+    )
 
     db = MagicMock()
     db.table.side_effect = (

@@ -1,7 +1,7 @@
 # AGENTS.md — Flow AI Master Agent Index
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-20
+> Last Updated: 2026-04-21
 
 ---
 
@@ -18,7 +18,7 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 | chief-of-staff | `docs/status_log.md`, `AGENTS.md` | This file; `/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/docs/status_log.md` |
 | product-manager | `docs/requirements/` | Not yet created — see gap audit |
 | ux-ui-designer | `docs/ux-ui-spec/` | Not yet created |
-| software-architect | `docs/architecture/` | `docs/architecture/00_platform_architecture.md` (platform engine architecture, live); `docs/architecture/code_map.md` (cold-start file index, all 15 engine files, Supabase data flow, where-to-look table) |
+| software-architect | `docs/architecture/`, `docs/observability/` | `docs/architecture/00_platform_architecture.md` (platform engine architecture, live); `docs/architecture/code_map.md` (cold-start file index, all 15 engine files, Supabase data flow, where-to-look table); `docs/observability/sql-reference.md` (operational SQL queries for monitoring, 2026-04-21) |
 | sdet-engineer | `docs/test-plan/`, worktrees | Not yet created |
 | business-strategist | `docs/business-plan.md`, `docs/pitch-deck.md` | `Product/docs/business-plan.md` exists (partial) |
 | growth-marketer | `docs/messaging-playbook.md`, etc. | Not yet created |
@@ -139,6 +139,7 @@ These are the bill-to fields for HeyAircon invoices. Pass these at call time whe
 | Task | Read first |
 |------|-----------|
 | Understanding which code file handles what | `docs/architecture/code_map.md` |
+| Monitoring API usage, incidents, guardrails, or writing SQL analytics queries | `docs/observability/sql-reference.md` |
 
 ---
 

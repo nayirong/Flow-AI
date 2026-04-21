@@ -505,3 +505,53 @@ async def test_guardrail_reprompt_recovers_booking(mock_call_llm, mock_get_clien
     assert result == confirmation_text
     assert result != _BOOKING_GUARDRAIL_FALLBACK
     assert mock_call_llm.call_count == 4
+
+
+@pytest.mark.asyncio
+@patch("engine.core.agent_runner._get_llm_client")
+@patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
+async def test_guardrail_reprompt_text_response_blocked(mock_call_llm, mock_get_client):
+    """
+    Agent calls check_calendar_availability, then returns premature confirmation
+    language (no write_booking). Guardrail injects re-prompt. On the next iteration
+    the agent responds with plain text (internal reasoning — no confirmation keywords,
+    no write_booking call). That text must NOT be returned to the customer;
+    run_agent must return _BOOKING_GUARDRAIL_FALLBACK instead.
+    """
+    from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
+
+    # Sequence:
+    # 1. tool_use: check_calendar_availability
+    # 2. end_turn: premature confirmation → re-prompt injected (_booking_reprompt_used = True)
+    # 3. end_turn: internal reasoning text (no confirmation keywords, no write_booking)
+    #    → must be blocked and return fallback, NOT sent to customer
+    calendar_resp = _tool_use_response(
+        tool_name="check_calendar_availability",
+        tool_id="tool_cal_005",
+        tool_input={"date": "2026-04-30", "timezone": "Asia/Singapore"},
+    )
+    premature_confirm = _end_turn_response(
+        "Your booking is confirmed for 30 April AM. See you on the day!"
+    )
+    # Internal reasoning text — no confirmation keywords, no write_booking call
+    internal_reasoning = _end_turn_response(
+        "I appreciate you pointing that out, but I need to clarify the situation with you."
+    )
+
+    mock_call_llm.side_effect = [calendar_resp, premature_confirm, internal_reasoning]
+
+    async def mock_check_calendar(**kwargs):
+        return {"am_available": True, "pm_available": False}
+
+    result = await run_agent(
+        system_message="Sys.",
+        conversation_history=[],
+        current_message="Book me for 30 April AM.",
+        tool_definitions=[{"name": "check_calendar_availability"}],
+        tool_dispatch={"check_calendar_availability": mock_check_calendar},
+    )
+
+    # Internal reasoning must not leak to customer
+    assert result == _BOOKING_GUARDRAIL_FALLBACK
+    assert "I appreciate you pointing that out" not in result
+    assert mock_call_llm.call_count == 3

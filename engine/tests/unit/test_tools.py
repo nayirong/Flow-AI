@@ -152,6 +152,123 @@ async def test_write_booking_inserts_row_and_updates_customer(mock_create_event)
     assert "customers" in table_names
 
 
+def _make_db_with_customer_count(booking_count: int):
+    """
+    Supabase mock where the customers table SELECT returns a row with a
+    specific booking_count. Used to verify booking_count increment logic.
+
+    The mock handles the call sequence for Step 3:
+      db.table("customers").select("booking_count").eq(...).limit(1).execute()  → returns count
+      db.table("customers").update({...}).eq(...).execute()                      → success
+    """
+    # Chain for the SELECT call (returns existing booking_count)
+    select_chain = MagicMock()
+    select_chain.select.return_value = select_chain
+    select_chain.eq.return_value = select_chain
+    select_chain.limit.return_value = select_chain
+    select_chain.execute = AsyncMock(
+        return_value=MagicMock(data=[{"booking_count": booking_count}])
+    )
+
+    # Chain for the UPDATE call
+    update_chain = MagicMock()
+    update_chain.update.return_value = update_chain
+    update_chain.eq.return_value = update_chain
+    update_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # bookings INSERT chain
+    bookings_chain = MagicMock()
+    bookings_chain.insert.return_value = bookings_chain
+    bookings_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # Route db.table() calls: bookings → bookings_chain, customers calls alternate
+    # select (first customers call) then update (second customers call)
+    customers_calls = [select_chain, update_chain]
+    customers_call_count = {"n": 0}
+
+    def table_router(name):
+        if name == "bookings":
+            return bookings_chain
+        # customers — return select_chain first, update_chain second
+        idx = customers_call_count["n"]
+        customers_call_count["n"] += 1
+        return customers_calls[idx] if idx < len(customers_calls) else update_chain
+
+    db = MagicMock()
+    db.table.side_effect = table_router
+    db._update_chain = update_chain  # expose for assertion
+    return db
+
+
+@pytest.mark.asyncio
+@patch("engine.integrations.google_calendar.create_booking_event", new_callable=AsyncMock)
+async def test_write_booking_increments_booking_count_from_zero(mock_create_event):
+    """
+    New customer (booking_count=0): write_booking must update booking_count to 1.
+    """
+    from engine.core.tools.booking_tools import write_booking
+
+    mock_create_event.return_value = "cal_event_new"
+    db = _make_db_with_customer_count(0)
+    cfg = _make_client_config(has_calendar=True)
+
+    result = await write_booking(
+        db=db,
+        client_config=cfg,
+        phone_number="6591111111",
+        customer_name="Carol Ng",
+        service_type="General Servicing",
+        unit_count="1",
+        address="3 Bedok North Ave",
+        postal_code="460003",
+        slot_date="2026-05-10",
+        slot_window="AM",
+    )
+
+    assert result["status"] == "Confirmed"
+
+    # Verify the UPDATE was called with booking_count=1
+    update_call_args = db._update_chain.update.call_args
+    assert update_call_args is not None
+    updated_data = update_call_args[0][0]  # first positional arg to .update()
+    assert updated_data["booking_count"] == 1
+    assert updated_data["customer_name"] == "Carol Ng"
+
+
+@pytest.mark.asyncio
+@patch("engine.integrations.google_calendar.create_booking_event", new_callable=AsyncMock)
+async def test_write_booking_increments_booking_count_from_one(mock_create_event):
+    """
+    Returning customer (booking_count=1): write_booking must update booking_count to 2.
+    """
+    from engine.core.tools.booking_tools import write_booking
+
+    mock_create_event.return_value = "cal_event_return"
+    db = _make_db_with_customer_count(1)
+    cfg = _make_client_config(has_calendar=True)
+
+    result = await write_booking(
+        db=db,
+        client_config=cfg,
+        phone_number="6592222222",
+        customer_name="David Koh",
+        service_type="Chemical Wash",
+        unit_count="2",
+        address="8 Bishan Street 11",
+        postal_code="570008",
+        slot_date="2026-05-15",
+        slot_window="PM",
+    )
+
+    assert result["status"] == "Confirmed"
+
+    update_call_args = db._update_chain.update.call_args
+    assert update_call_args is not None
+    updated_data = update_call_args[0][0]
+    assert updated_data["booking_count"] == 2
+    assert updated_data["customer_name"] == "David Koh"
+
+
 @pytest.mark.asyncio
 async def test_write_booking_no_calendar_raises_and_alerts():
     """No calendar config → raises RuntimeError and alerts human agent (never writes to DB)."""

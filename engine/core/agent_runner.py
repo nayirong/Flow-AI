@@ -417,53 +417,71 @@ async def run_agent(
             # Guardrail: only active when check_calendar_availability succeeded this
             # invocation (i.e., we are in the booking confirmation phase). Prevents
             # false positives from casual confirmation language in non-booking turns.
-            if (calendar_check_succeeded
-                    and not booking_write_succeeded
-                    and _contains_booking_confirmation(final_text)):
-                if not _booking_reprompt_used:
-                    _booking_reprompt_used = True
+            if calendar_check_succeeded and not booking_write_succeeded:
+                if _contains_booking_confirmation(final_text):
+                    if not _booking_reprompt_used:
+                        _booking_reprompt_used = True
+                        logger.warning(
+                            "GUARDRAIL: agent skipped write_booking (iter=%d, client_id=%s) — "
+                            "injecting re-prompt to recover.",
+                            iteration + 1,
+                            client_id,
+                        )
+                        await log_incident(
+                            provider="agent_guardrail",
+                            error_type="guardrail_reprompt_injected",
+                            error_message=f"Agent skipped write_booking at iter={iteration + 1}. Re-prompt injected.",
+                            client_id=client_id,
+                        )
+                        # Append the agent's premature confirmation as assistant turn,
+                        # then inject a correction as a user turn so Claude calls write_booking.
+                        messages.append({
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": final_text}],
+                        })
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "[SYSTEM CORRECTION] You have not called write_booking yet. "
+                                "You must call write_booking before confirming the booking. "
+                                "Please call write_booking now with the details already collected."
+                            ),
+                        })
+                        continue
+
+                    # Re-prompt was already tried — still confirmation language, still no
+                    # write_booking. Give up.
                     logger.warning(
-                        "GUARDRAIL: agent skipped write_booking (iter=%d, client_id=%s) — "
-                        "injecting re-prompt to recover.",
+                        "GUARDRAIL FIRED: write_booking still not called after re-prompt "
+                        "(iter=%d, client_id=%s). Returning safe fallback.",
                         iteration + 1,
                         client_id,
                     )
                     await log_incident(
                         provider="agent_guardrail",
-                        error_type="guardrail_reprompt_injected",
-                        error_message=f"Agent skipped write_booking at iter={iteration + 1}. Re-prompt injected.",
+                        error_type="guardrail_fired",
+                        error_message=f"write_booking not called after re-prompt at iter={iteration + 1}. Fallback returned to customer.",
                         client_id=client_id,
                     )
-                    # Append the agent's premature confirmation as assistant turn,
-                    # then inject a correction as a user turn so Claude calls write_booking.
-                    messages.append({
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": final_text}],
-                    })
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "[SYSTEM CORRECTION] You have not called write_booking yet. "
-                            "You must call write_booking before confirming the booking. "
-                            "Please call write_booking now with the details already collected."
-                        ),
-                    })
-                    continue
+                    return _BOOKING_GUARDRAIL_FALLBACK
 
-                # Re-prompt was already tried — still no write_booking. Give up.
-                logger.warning(
-                    "GUARDRAIL FIRED: write_booking still not called after re-prompt "
-                    "(iter=%d, client_id=%s). Returning safe fallback.",
-                    iteration + 1,
-                    client_id,
-                )
-                await log_incident(
-                    provider="agent_guardrail",
-                    error_type="guardrail_fired",
-                    error_message=f"write_booking not called after re-prompt at iter={iteration + 1}. Fallback returned to customer.",
-                    client_id=client_id,
-                )
-                return _BOOKING_GUARDRAIL_FALLBACK
+                elif _booking_reprompt_used:
+                    # Re-prompt was injected but the agent responded with plain text
+                    # instead of calling write_booking. This is internal reasoning that
+                    # must never reach the customer.
+                    logger.warning(
+                        "GUARDRAIL: agent responded with text after re-prompt instead of "
+                        "calling write_booking (iter=%d, client_id=%s). Returning safe fallback.",
+                        iteration + 1,
+                        client_id,
+                    )
+                    await log_incident(
+                        provider="agent_guardrail",
+                        error_type="guardrail_reprompt_text_leak_blocked",
+                        error_message=f"Agent produced text after re-prompt without calling write_booking at iter={iteration + 1}.",
+                        client_id=client_id,
+                    )
+                    return _BOOKING_GUARDRAIL_FALLBACK
 
             return final_text or _FALLBACK_RESPONSE
 
