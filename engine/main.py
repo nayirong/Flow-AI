@@ -39,6 +39,20 @@ logger = logging.getLogger(__name__)
 
 from engine.api.webhook import app  # noqa: E402 — must come after logging setup
 
+# ── Startup validation ────────────────────────────────────────────────────────
+# Run config checks before the server accepts traffic. Raises on critical issues
+# (missing required env vars, test number in human_agent_number, Supabase down).
+
+@app.on_event("startup")
+async def _run_startup_validation() -> None:
+    """Validate config at startup. Critical failures abort the service."""
+    try:
+        from engine.config.startup_validator import validate_startup_config
+        await validate_startup_config(abort_on_fatal=True)
+    except RuntimeError as e:
+        logger.critical("Startup validation aborted: %s", e)
+        raise  # Let Railway mark the deploy as failed
+
 # Re-export for uvicorn: `uvicorn engine.main:app`
 __all__ = ["app"]
 

@@ -43,7 +43,7 @@ def _get_customer_lock(phone_number: str) -> asyncio.Lock:
 # Human agent will follow up directly.
 HOLDING_REPLY = (
     "Thank you for reaching out. "
-    "A member of our team will get back to you shortly."
+    "A member of our team will get back to you today."
 )
 
 # Sent when a critical Supabase failure prevents normal processing.

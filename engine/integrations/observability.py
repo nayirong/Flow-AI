@@ -1,9 +1,12 @@
 """
-Observability — LLM provider incident logging and usage tracking.
+Observability — LLM provider incident logging, usage tracking, and non-critical failure logging.
 
-Writes to two tables in the shared Flow AI Supabase (not per-client):
-  - api_incidents: one row per provider failure (outage detection, frequency)
-  - api_usage:     one row per successful LLM call (token usage, cost tracking)
+Writes to tables in the shared Flow AI Supabase (not per-client):
+  - api_incidents:        one row per provider failure (outage detection, frequency)
+  - api_usage:            one row per successful LLM call (token usage, cost tracking)
+  - noncritical_failures: one row per non-critical integration failure (Sheets sync,
+                          human-agent alerts, config mismatches). Eventually routed
+                          to a Telegram group chat via bot.
 
 DDL (run once in shared Supabase):
 
@@ -29,15 +32,64 @@ DDL (run once in shared Supabase):
         total_tokens    INT
     );
 
+    CREATE TABLE noncritical_failures (
+        id            BIGSERIAL PRIMARY KEY,
+        ts            TIMESTAMPTZ DEFAULT NOW(),
+        source        TEXT NOT NULL,           -- e.g. 'sheets_sync_customer', 'escalation_human_alert'
+        error_type    TEXT NOT NULL,           -- Exception class name
+        error_message TEXT,
+        client_id     TEXT,
+        context       JSONB                    -- arbitrary key-value context (phone_number, row_id, etc.)
+    );
+
     CREATE INDEX ON api_incidents (ts DESC);
     CREATE INDEX ON api_incidents (provider, ts DESC);
     CREATE INDEX ON api_usage (provider, ts DESC);
     CREATE INDEX ON api_usage (client_id, ts DESC);
+    CREATE INDEX ON noncritical_failures (ts DESC);
+    CREATE INDEX ON noncritical_failures (client_id, ts DESC);
+    CREATE INDEX ON noncritical_failures (source, ts DESC);
+
+Telegram bot extension point
+─────────────────────────────
+When you're ready to route non-critical failures to a Telegram group chat, add
+a call to `_send_telegram_alert()` inside `log_noncritical_failure()` after the
+Supabase insert. The function signature is prepared below (no-op stub until wired).
+Required env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_CHAT_ID.
 """
 import logging
-from typing import Any
+import os
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── Telegram extension point (no-op until wired) ──────────────────────────────
+
+async def _send_telegram_alert(message: str) -> None:
+    """
+    Send an alert message to the configured Telegram group chat.
+
+    No-op stub — activate by setting TELEGRAM_BOT_TOKEN and TELEGRAM_ALERT_CHAT_ID
+    env vars. When both are present, sends via the Telegram Bot API.
+    Never raises.
+    """
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
+    if not bot_token or not chat_id:
+        return  # Not yet configured — silent no-op
+    try:
+        import httpx
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(url, json={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True,
+            })
+    except Exception as e:
+        logger.warning("Telegram alert failed (non-critical): %s", e)
 
 
 async def log_incident(
@@ -132,3 +184,67 @@ def extract_usage(response: Any, provider: str) -> tuple[int, int]:
             return usage.prompt_tokens, usage.completion_tokens
     except Exception:
         return 0, 0
+
+
+async def log_noncritical_failure(
+    source: str,
+    error_type: str,
+    error_message: str,
+    client_id: str = "",
+    context: Optional[dict] = None,
+) -> None:
+    """
+    Log a non-critical integration failure to the shared Supabase.
+
+    Non-critical = failure that does NOT prevent the customer from completing
+    their booking. Examples: Sheets sync failure, failed human-agent WhatsApp
+    alert (non-booking), config warning.
+
+    Critical failures (booking write or calendar event failure) use
+    _alert_booking_failure() in booking_tools.py instead.
+
+    Also fires a Telegram alert if TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID
+    are configured (no-op until then).
+
+    Never raises.
+
+    Args:
+        source:        Short identifier for where the failure occurred.
+                       e.g. "sheets_sync_customer", "escalation_human_alert",
+                            "escalation_sheets_sync", "pre_deploy_config"
+        error_type:    Exception class name (e.g. "ConnectionError")
+        error_message: str(exception) — truncated to 500 chars
+        client_id:     Client slug this failure is associated with
+        context:       Optional dict of extra diagnostic keys (phone_number, row_id, etc.)
+    """
+    try:
+        from engine.integrations.supabase_client import get_shared_db
+        db = await get_shared_db()
+        await db.table("noncritical_failures").insert({
+            "source": source,
+            "error_type": error_type,
+            "error_message": str(error_message)[:500],
+            "client_id": client_id or None,
+            "context": context or {},
+        }).execute()
+        logger.debug(
+            "Non-critical failure logged: source=%s error=%s client=%s",
+            source, error_type, client_id,
+        )
+    except Exception as e:
+        # Observability must never crash the caller — fall back to local log only
+        logger.error(
+            "Failed to log non-critical failure to Supabase "
+            "(source=%s error=%s): %s", source, error_type, e,
+        )
+
+    # Telegram alert (no-op until TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID are set)
+    try:
+        alert_text = (
+            f"⚠️ *Non-critical failure* | `{source}`\n"
+            f"Client: `{client_id or 'unknown'}`\n"
+            f"Error: `{error_type}` — {str(error_message)[:200]}"
+        )
+        await _send_telegram_alert(alert_text)
+    except Exception:
+        pass  # Telegram path must never propagate

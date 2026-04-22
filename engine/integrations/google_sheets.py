@@ -269,6 +269,18 @@ async def sync_customer_to_sheets(
             f"row_id={customer_data.get('id')} error={type(e).__name__}: {e}",
             exc_info=True,
         )
+        # Log as non-critical failure (does not block any customer-facing flow)
+        try:
+            from engine.integrations.observability import log_noncritical_failure
+            asyncio.create_task(log_noncritical_failure(
+                source="sheets_sync_customer",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                client_id=client_id,
+                context={"row_id": str(customer_data.get("id", ""))},
+            ))
+        except Exception:
+            pass  # Observability must never raise
 
 
 async def sync_booking_to_sheets(
@@ -339,3 +351,15 @@ async def sync_booking_to_sheets(
             f"error={type(e).__name__}: {e}",
             exc_info=True,
         )
+        # Log as non-critical failure (booking is already in Supabase — Sheets is mirror only)
+        try:
+            from engine.integrations.observability import log_noncritical_failure
+            asyncio.create_task(log_noncritical_failure(
+                source="sheets_sync_booking",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                client_id=client_id,
+                context={"row_id": str(booking_data.get("id") or booking_data.get("booking_id", ""))},
+            ))
+        except Exception:
+            pass  # Observability must never raise

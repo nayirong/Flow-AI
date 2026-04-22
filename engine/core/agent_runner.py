@@ -40,7 +40,7 @@ _FALLBACK_RESPONSE = (
 # calendar event was created and no Supabase row was written.
 _BOOKING_GUARDRAIL_FALLBACK = (
     "I'm sorry, I wasn't able to complete your booking right now. "
-    "Our team will follow up with you shortly to confirm your appointment."
+    "A member of our team will follow up with you today to confirm your appointment."
 )
 _BOOKING_CONFIRMATION_KEYWORDS = [
     "confirmed",
@@ -61,6 +61,74 @@ def _contains_booking_confirmation(text: str) -> bool:
     """Return True if text contains booking confirmation language."""
     lower = text.lower()
     return any(keyword in lower for keyword in _BOOKING_CONFIRMATION_KEYWORDS)
+
+
+# ── Booking guardrail ─────────────────────────────────────────────────────────
+
+class _GuardrailAction:
+    """Return type from _apply_booking_guardrail — one of four outcomes."""
+    PASS_THROUGH = "pass_through"       # No guardrail concern — return final_text as-is
+    INJECT_REPROMPT = "inject_reprompt" # Guardrail caught premature confirm — inject correction
+    ESCALATED = "escalated"             # Agent escalated after re-prompt — valid, return text
+    FIRE_FALLBACK = "fire_fallback"     # Guardrail exhausted — return safe fallback text
+
+
+def _apply_booking_guardrail(
+    final_text: str,
+    calendar_check_succeeded: bool,
+    booking_write_succeeded: bool,
+    booking_reprompt_used: bool,
+    escalation_called: bool,
+    iteration: int,
+    client_id: str,
+) -> tuple[str, str]:
+    """
+    Apply the booking confirmation guardrail to an end-turn agent response.
+
+    The guardrail is ONLY active when:
+      - check_calendar_availability succeeded this invocation (we are genuinely
+        in the booking phase — prevents false positives on casual "all set" language)
+      - write_booking has NOT succeeded
+
+    Returns:
+        (action, detail) where action is one of _GuardrailAction constants.
+        detail is a log message for the caller.
+
+    The caller decides what to do based on the action:
+      PASS_THROUGH   → return final_text
+      INJECT_REPROMPT → inject correction messages and continue the loop
+      ESCALATED       → return final_text (agent resolved via escalation)
+      FIRE_FALLBACK   → escalate + return _BOOKING_GUARDRAIL_FALLBACK
+    """
+    if not (calendar_check_succeeded and not booking_write_succeeded):
+        return _GuardrailAction.PASS_THROUGH, ""
+
+    if _contains_booking_confirmation(final_text):
+        if not booking_reprompt_used:
+            return (
+                _GuardrailAction.INJECT_REPROMPT,
+                f"agent skipped write_booking (iter={iteration}, client_id={client_id}) — re-prompt injected",
+            )
+        # Re-prompt was used but still confirmation language — guardrail exhausted
+        return (
+            _GuardrailAction.FIRE_FALLBACK,
+            f"write_booking not called after re-prompt (iter={iteration}, client_id={client_id})",
+        )
+
+    if booking_reprompt_used:
+        if escalation_called:
+            # Agent escalated in response to re-prompt — valid resolution
+            return (
+                _GuardrailAction.ESCALATED,
+                f"agent escalated after re-prompt (iter={iteration}, client_id={client_id})",
+            )
+        # Re-prompt injected but agent produced plain text — internal reasoning leaked
+        return (
+            _GuardrailAction.FIRE_FALLBACK,
+            f"agent produced text after re-prompt without calling write_booking (iter={iteration}, client_id={client_id})",
+        )
+
+    return _GuardrailAction.PASS_THROUGH, ""
 
 
 # ── Provider shim ─────────────────────────────────────────────────────────────
@@ -419,98 +487,68 @@ async def run_agent(
             # invocation (i.e., we are in the booking confirmation phase). Prevents
             # false positives from casual confirmation language in non-booking turns.
             if calendar_check_succeeded and not booking_write_succeeded:
-                if _contains_booking_confirmation(final_text):
-                    if not _booking_reprompt_used:
-                        _booking_reprompt_used = True
-                        logger.warning(
-                            "GUARDRAIL: agent skipped write_booking (iter=%d, client_id=%s) — "
-                            "injecting re-prompt to recover.",
-                            iteration + 1,
-                            client_id,
-                        )
-                        await log_incident(
-                            provider="agent_guardrail",
-                            error_type="guardrail_reprompt_injected",
-                            error_message=f"Agent skipped write_booking at iter={iteration + 1}. Re-prompt injected.",
-                            client_id=client_id,
-                        )
-                        # Append the agent's premature confirmation as assistant turn,
-                        # then inject a correction as a user turn so Claude calls write_booking.
-                        messages.append({
-                            "role": "assistant",
-                            "content": [{"type": "text", "text": final_text}],
-                        })
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                "[SYSTEM CORRECTION] You have not called write_booking yet. "
-                                "You must take one of the following actions now — do not respond with text: "
-                                "(1) The ONLY required fields for write_booking are: customer_name, service_type, "
-                                "unit_count, address, postal_code, slot_date, slot_window. BTU size, aircon brand, "
-                                "and other optional details are NOT required — do not block on them. "
-                                "If you have all 7 required fields, call write_booking immediately. "
-                                "(2) Only if one of those 7 required fields is genuinely unknown, call escalate_to_human. "
-                                "Do not ask the customer for more information."
-                            ),
-                        })
-                        continue
+                guardrail_action, guardrail_detail = _apply_booking_guardrail(
+                    final_text=final_text,
+                    calendar_check_succeeded=calendar_check_succeeded,
+                    booking_write_succeeded=booking_write_succeeded,
+                    booking_reprompt_used=_booking_reprompt_used,
+                    escalation_called=escalation_called,
+                    iteration=iteration + 1,
+                    client_id=client_id,
+                )
 
-                    # Re-prompt was already tried — still confirmation language, still no
-                    # write_booking. Give up. Escalate so human is notified.
-                    logger.warning(
-                        "GUARDRAIL FIRED: write_booking still not called after re-prompt "
-                        "(iter=%d, client_id=%s). Returning safe fallback.",
-                        iteration + 1,
-                        client_id,
+                if guardrail_action == _GuardrailAction.INJECT_REPROMPT:
+                    _booking_reprompt_used = True
+                    logger.warning("GUARDRAIL: %s", guardrail_detail)
+                    await log_incident(
+                        provider="agent_guardrail",
+                        error_type="guardrail_reprompt_injected",
+                        error_message=guardrail_detail,
+                        client_id=client_id,
                     )
+                    messages.append({
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": final_text}],
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[SYSTEM CORRECTION] You have not called write_booking yet. "
+                            "You must take one of the following actions now — do not respond with text: "
+                            "(1) The ONLY required fields for write_booking are: customer_name, service_type, "
+                            "unit_count, address, postal_code, slot_date, slot_window. BTU size, aircon brand, "
+                            "and other optional details are NOT required — do not block on them. "
+                            "If you have all 7 required fields, call write_booking immediately. "
+                            "(2) Only if one of those 7 required fields is genuinely unknown, call escalate_to_human. "
+                            "Do not ask the customer for more information."
+                        ),
+                    })
+                    continue
+
+                elif guardrail_action == _GuardrailAction.ESCALATED:
+                    logger.info("GUARDRAIL: %s — returning agent reply", guardrail_detail)
+                    return final_text or _FALLBACK_RESPONSE
+
+                elif guardrail_action == _GuardrailAction.FIRE_FALLBACK:
+                    logger.warning("GUARDRAIL FIRED: %s", guardrail_detail)
                     await log_incident(
                         provider="agent_guardrail",
                         error_type="guardrail_fired",
-                        error_message=f"write_booking not called after re-prompt at iter={iteration + 1}. Fallback returned to customer.",
+                        error_message=guardrail_detail,
                         client_id=client_id,
                     )
                     try:
                         await tool_dispatch["escalate_to_human"](
-                            reason="Booking guardrail fired — agent could not complete write_booking. Customer needs manual follow-up to confirm booking."
+                            reason=(
+                                "Booking guardrail fired — agent could not complete write_booking. "
+                                "Customer needs manual follow-up to confirm booking."
+                            )
                         )
                     except Exception as esc_err:
                         logger.error("Failed to escalate after guardrail fire: %s", esc_err)
                     return _BOOKING_GUARDRAIL_FALLBACK
 
-                elif _booking_reprompt_used:
-                    if escalation_called:
-                        # Agent called escalate_to_human in response to the re-prompt —
-                        # that is a valid resolution. Let the agent's reply through.
-                        logger.info(
-                            "GUARDRAIL: agent escalated after re-prompt (iter=%d, client_id=%s) — "
-                            "returning agent reply.",
-                            iteration + 1,
-                            client_id,
-                        )
-                        return final_text or _FALLBACK_RESPONSE
-
-                    # Re-prompt was injected but the agent responded with plain text
-                    # instead of calling write_booking or escalate_to_human.
-                    # This is internal reasoning that must never reach the customer.
-                    logger.warning(
-                        "GUARDRAIL: agent responded with text after re-prompt instead of "
-                        "calling write_booking (iter=%d, client_id=%s). Returning safe fallback.",
-                        iteration + 1,
-                        client_id,
-                    )
-                    await log_incident(
-                        provider="agent_guardrail",
-                        error_type="guardrail_reprompt_text_leak_blocked",
-                        error_message=f"Agent produced text after re-prompt without calling write_booking at iter={iteration + 1}.",
-                        client_id=client_id,
-                    )
-                    try:
-                        await tool_dispatch["escalate_to_human"](
-                            reason="Booking guardrail fired — agent responded with text after re-prompt instead of calling write_booking. Customer needs manual follow-up."
-                        )
-                    except Exception as esc_err:
-                        logger.error("Failed to escalate after guardrail fire: %s", esc_err)
-                    return _BOOKING_GUARDRAIL_FALLBACK
+                # _GuardrailAction.PASS_THROUGH — fall through to return below
 
             return final_text or _FALLBACK_RESPONSE
 

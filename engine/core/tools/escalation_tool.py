@@ -7,6 +7,7 @@ the agent for all future messages from this customer until a human clears the fl
 
 db, client_config, and phone_number are injected via closure in build_tool_dispatch().
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -69,6 +70,37 @@ async def escalate_to_human(
         logger.info(
             f"Escalation flag set for {phone_number} — reason: {reason}"
         )
+
+        # Sync updated customer record to Google Sheets (fire-and-forget).
+        # Fetch the full row so Sheets has accurate data (booking count, name, etc.).
+        try:
+            from engine.integrations.google_sheets import sync_customer_to_sheets
+            row_result = (
+                await db.table("customers")
+                .select("*")
+                .eq("phone_number", phone_number)
+                .limit(1)
+                .execute()
+            )
+            if row_result.data:
+                asyncio.create_task(sync_customer_to_sheets(
+                    client_id=client_config.client_id,
+                    client_config=client_config,
+                    customer_data=row_result.data[0],
+                ))
+        except Exception as sheets_err:
+            from engine.integrations.observability import log_noncritical_failure
+            asyncio.create_task(log_noncritical_failure(
+                source="escalation_sheets_sync",
+                error_type=type(sheets_err).__name__,
+                error_message=str(sheets_err),
+                client_id=client_config.client_id,
+                context={"phone_number": phone_number},
+            ))
+            logger.warning(
+                f"Sheets sync failed after escalation for {phone_number}: {sheets_err}"
+            )
+
     except Exception as e:
         logger.error(
             f"Failed to set escalation_flag for {phone_number}: {e}",
@@ -99,6 +131,17 @@ async def escalate_to_human(
                 f"Failed to send human agent alert for {phone_number}: {e}",
                 exc_info=True,
             )
+            try:
+                from engine.integrations.observability import log_noncritical_failure
+                asyncio.create_task(log_noncritical_failure(
+                    source="escalation_human_alert",
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    client_id=client_config.client_id,
+                    context={"phone_number": phone_number, "human_agent_number": client_config.human_agent_number},
+                ))
+            except Exception:
+                pass  # Observability must never crash escalation.
     else:
         logger.warning(
             f"No human_agent_number configured for client {client_config.client_id} "
