@@ -15,7 +15,9 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "check_calendar_availability",
         "description": (
             "Check whether the AM slot (9am–1pm) and/or PM slot (2pm–6pm) are available "
-            "on a given date. Call this BEFORE offering a customer an appointment slot. "
+            "on a given date. Only call this AFTER you have confirmed ALL required booking "
+            "fields from the customer: service type, number of units, full address, and "
+            "postal code. Do not call this if any required booking field is still unknown. "
             "Returns availability status and a human-readable summary message."
         ),
         "input_schema": {

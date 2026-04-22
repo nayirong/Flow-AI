@@ -26,6 +26,19 @@ from engine.core.tools import TOOL_DEFINITIONS, build_tool_dispatch
 
 logger = logging.getLogger(__name__)
 
+# Per-customer asyncio locks — serialize agent invocations for the same phone number.
+# Prevents race conditions when a customer sends multiple messages in rapid succession:
+# without this, concurrent background tasks read stale conversation history and
+# produce duplicate/conflicting agent responses.
+_customer_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_customer_lock(phone_number: str) -> asyncio.Lock:
+    """Return (or create) the asyncio.Lock for a given phone number."""
+    if phone_number not in _customer_locks:
+        _customer_locks[phone_number] = asyncio.Lock()
+    return _customer_locks[phone_number]
+
 # Sent to the customer when their escalation_flag is True.
 # Human agent will follow up directly.
 HOLDING_REPLY = (
@@ -199,48 +212,55 @@ async def handle_inbound_message(
             # Upsert failure is non-fatal — continue to agent.
 
         # ── Step 6: Context builder → agent runner → send reply ───────────────
+        # Acquire per-customer lock before running the agent. This serializes
+        # concurrent background tasks for the same customer so each agent turn
+        # reads a fully up-to-date conversation history (including replies from
+        # the preceding turn). Without this, rapid successive messages produce
+        # parallel agent invocations with stale history.
         logger.info(
             f"Escalation gate passed for {phone_number} (client: {client_id}) — "
             "invoking agent"
         )
-        try:
-            system_message = await build_system_message(db)
-            history = await fetch_conversation_history(db, phone_number)
-            tool_dispatch = build_tool_dispatch(db, client_config, phone_number)
-            agent_reply = await run_agent(
-                system_message=system_message,
-                conversation_history=history,
-                current_message=message_text,
-                tool_definitions=TOOL_DEFINITIONS,
-                tool_dispatch=tool_dispatch,
-                client_id=client_id,
-                anthropic_api_key=client_config.anthropic_api_key,
-                openai_api_key=client_config.openai_api_key,
-            )
-        except Exception as e:
-            logger.error(
-                f"Agent error for {phone_number} (client: {client_id}): {e}",
-                exc_info=True,
-            )
-            agent_reply = FALLBACK_REPLY
+        async with _get_customer_lock(phone_number):
+            try:
+                system_message = await build_system_message(db)
+                history = await fetch_conversation_history(db, phone_number)
+                tool_dispatch = build_tool_dispatch(db, client_config, phone_number)
+                agent_reply = await run_agent(
+                    system_message=system_message,
+                    conversation_history=history,
+                    current_message=message_text,
+                    tool_definitions=TOOL_DEFINITIONS,
+                    tool_dispatch=tool_dispatch,
+                    client_id=client_id,
+                    anthropic_api_key=client_config.anthropic_api_key,
+                    openai_api_key=client_config.openai_api_key,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Agent error for {phone_number} (client: {client_id}): {e}",
+                    exc_info=True,
+                )
+                agent_reply = FALLBACK_REPLY
 
-        # ── Step 7: Send reply + log outbound ─────────────────────────────────
-        _now = datetime.now(timezone.utc).isoformat()
-        try:
-            await send_message(client_config, phone_number, agent_reply)
-            await db.table("interactions_log").insert({
-                "timestamp": _now,
-                "phone_number": phone_number,
-                "direction": "outbound",
-                "message_text": agent_reply,
-                "message_type": "text",
-            }).execute()
-            logger.info(f"Reply sent and logged for {phone_number}")
-        except Exception as e:
-            logger.error(
-                f"Failed to send/log agent reply to {phone_number}: {e}",
-                exc_info=True,
-            )
+            # ── Step 7: Send reply + log outbound ─────────────────────────────
+            # Inside the lock so the next waiting task sees this reply in history.
+            _now = datetime.now(timezone.utc).isoformat()
+            try:
+                await send_message(client_config, phone_number, agent_reply)
+                await db.table("interactions_log").insert({
+                    "timestamp": _now,
+                    "phone_number": phone_number,
+                    "direction": "outbound",
+                    "message_text": agent_reply,
+                    "message_type": "text",
+                }).execute()
+                logger.info(f"Reply sent and logged for {phone_number}")
+            except Exception as e:
+                logger.error(
+                    f"Failed to send/log agent reply to {phone_number}: {e}",
+                    exc_info=True,
+                )
 
     except ClientNotFoundError:
         logger.error(

@@ -443,14 +443,17 @@ async def run_agent(
                             "role": "user",
                             "content": (
                                 "[SYSTEM CORRECTION] You have not called write_booking yet. "
-                                "You must call write_booking before confirming the booking. "
-                                "Please call write_booking now with the details already collected."
+                                "You must take one of the following actions now — do not respond with text: "
+                                "(1) If you have all required booking fields (customer_name, service_type, "
+                                "unit_count, address, postal_code, slot_date, slot_window), call write_booking immediately. "
+                                "(2) If any required field is still missing or unknown, call escalate_to_human so a "
+                                "human agent can complete the booking. Do not ask the customer for more information."
                             ),
                         })
                         continue
 
                     # Re-prompt was already tried — still confirmation language, still no
-                    # write_booking. Give up.
+                    # write_booking. Give up. Escalate so human is notified.
                     logger.warning(
                         "GUARDRAIL FIRED: write_booking still not called after re-prompt "
                         "(iter=%d, client_id=%s). Returning safe fallback.",
@@ -463,12 +466,18 @@ async def run_agent(
                         error_message=f"write_booking not called after re-prompt at iter={iteration + 1}. Fallback returned to customer.",
                         client_id=client_id,
                     )
+                    try:
+                        await tool_dispatch["escalate_to_human"](
+                            reason="Booking guardrail fired — agent could not complete write_booking. Customer needs manual follow-up to confirm booking."
+                        )
+                    except Exception as esc_err:
+                        logger.error("Failed to escalate after guardrail fire: %s", esc_err)
                     return _BOOKING_GUARDRAIL_FALLBACK
 
                 elif _booking_reprompt_used:
                     # Re-prompt was injected but the agent responded with plain text
                     # instead of calling write_booking. This is internal reasoning that
-                    # must never reach the customer.
+                    # must never reach the customer. Escalate so human is notified.
                     logger.warning(
                         "GUARDRAIL: agent responded with text after re-prompt instead of "
                         "calling write_booking (iter=%d, client_id=%s). Returning safe fallback.",
@@ -481,6 +490,12 @@ async def run_agent(
                         error_message=f"Agent produced text after re-prompt without calling write_booking at iter={iteration + 1}.",
                         client_id=client_id,
                     )
+                    try:
+                        await tool_dispatch["escalate_to_human"](
+                            reason="Booking guardrail fired — agent responded with text after re-prompt instead of calling write_booking. Customer needs manual follow-up."
+                        )
+                    except Exception as esc_err:
+                        logger.error("Failed to escalate after guardrail fire: %s", esc_err)
                     return _BOOKING_GUARDRAIL_FALLBACK
 
             return final_text or _FALLBACK_RESPONSE
