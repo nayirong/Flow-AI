@@ -256,6 +256,14 @@ async def handle_inbound_message(
         async with _get_customer_lock(phone_number):
             try:
                 system_message = await build_system_message(db)
+                known_name = (customer_row or {}).get("customer_name") if customer_row else None
+                if known_name:
+                    system_message += (
+                        f"\n\nCURRENT CUSTOMER:\n"
+                        f"Name: {known_name}\n"
+                        f"Use this name when calling write_booking — do NOT ask the customer "
+                        f"for their name again unless they say it has changed.\n"
+                    )
                 history = await fetch_conversation_history(db, phone_number)
                 tool_dispatch = build_tool_dispatch(db, client_config, phone_number)
                 agent_reply = await run_agent(
