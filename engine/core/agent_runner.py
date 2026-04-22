@@ -310,6 +310,7 @@ async def run_agent(
     calendar_check_succeeded = False
     booking_write_succeeded = False
     _booking_reprompt_used = False
+    escalation_called = False  # True if escalate_to_human ran successfully this turn
 
     # Build initial messages list: history + current inbound
     messages: list[dict] = list(conversation_history) + [
@@ -444,10 +445,12 @@ async def run_agent(
                             "content": (
                                 "[SYSTEM CORRECTION] You have not called write_booking yet. "
                                 "You must take one of the following actions now — do not respond with text: "
-                                "(1) If you have all required booking fields (customer_name, service_type, "
-                                "unit_count, address, postal_code, slot_date, slot_window), call write_booking immediately. "
-                                "(2) If any required field is still missing or unknown, call escalate_to_human so a "
-                                "human agent can complete the booking. Do not ask the customer for more information."
+                                "(1) The ONLY required fields for write_booking are: customer_name, service_type, "
+                                "unit_count, address, postal_code, slot_date, slot_window. BTU size, aircon brand, "
+                                "and other optional details are NOT required — do not block on them. "
+                                "If you have all 7 required fields, call write_booking immediately. "
+                                "(2) Only if one of those 7 required fields is genuinely unknown, call escalate_to_human. "
+                                "Do not ask the customer for more information."
                             ),
                         })
                         continue
@@ -475,9 +478,20 @@ async def run_agent(
                     return _BOOKING_GUARDRAIL_FALLBACK
 
                 elif _booking_reprompt_used:
+                    if escalation_called:
+                        # Agent called escalate_to_human in response to the re-prompt —
+                        # that is a valid resolution. Let the agent's reply through.
+                        logger.info(
+                            "GUARDRAIL: agent escalated after re-prompt (iter=%d, client_id=%s) — "
+                            "returning agent reply.",
+                            iteration + 1,
+                            client_id,
+                        )
+                        return final_text or _FALLBACK_RESPONSE
+
                     # Re-prompt was injected but the agent responded with plain text
-                    # instead of calling write_booking. This is internal reasoning that
-                    # must never reach the customer. Escalate so human is notified.
+                    # instead of calling write_booking or escalate_to_human.
+                    # This is internal reasoning that must never reach the customer.
                     logger.warning(
                         "GUARDRAIL: agent responded with text after re-prompt instead of "
                         "calling write_booking (iter=%d, client_id=%s). Returning safe fallback.",
@@ -525,6 +539,14 @@ async def run_agent(
                             if "error" not in result_data:
                                 calendar_check_succeeded = True
                                 logger.info("check_calendar_availability succeeded")
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                    if getattr(block, "name", None) == "escalate_to_human":
+                        try:
+                            result_data = json.loads(tool_result["content"])
+                            if result_data.get("status") == "escalated":
+                                escalation_called = True
                         except (json.JSONDecodeError, TypeError):
                             pass
 
