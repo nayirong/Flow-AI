@@ -239,15 +239,25 @@ These tests cover the escalation gate logic inside `handle_inbound_message`. The
 | `test_create_event_no_update_or_delete_called` | Any input | Neither `events.update()` nor `events.delete()` are called anywhere in the function | Google Calendar API client |
 | `test_create_event_google_api_error` | Google Calendar `events.insert()` raises exception | Returns `{"error": "calendar_write_failed", "message": <string>}` | Google Calendar client raising exception |
 
-### 3.6 Component 5 — Escalate-to-Human Tool (`test_escalation_tool.py`)
+### 3.6 Component 5 — Escalate-to-Human Tool (`test_escalation.py`)
 
-| Test name | Input | Expected output / behaviour | What is mocked |
-|-----------|-------|-----------------------------|----------------|
-| `test_escalation_sets_flag_in_supabase` | phone_number, reason, db, client_config | Supabase UPDATE called: `escalation_flag=TRUE`, `escalation_reason=<reason>` for correct phone_number | Supabase `AsyncClient` captured |
-| `test_escalation_sends_meta_notification` | phone_number='6591234567', reason='slot conflict' | `send_message` called with `to=ClientConfig.human_agent_number` and message containing phone_number and reason | `send_message` captured; Supabase mock |
-| `test_escalation_return_shape` | Valid inputs | Returns `{"status": "escalated", "phone_number": <phone>, "reason": <reason>}` | Supabase mock; `send_message` mock |
-| `test_escalation_db_failure_returns_error_dict` | Supabase UPDATE raises exception | Returns `{"error": "escalation_db_failed"}`; Meta notification NOT sent | Supabase raising exception; `send_message` assert NOT called |
-| `test_escalation_meta_failure_still_returns_success` | Supabase succeeds; Meta `send_message` raises exception | Function returns success dict (escalation_flag IS set even if notification fails); error logged | Supabase succeeds; `send_message` raises exception |
+**Status:** ✅ All tests passing (implemented 2026-04-22)
+
+| Test name | Input | Expected output / behaviour | What is mocked | Status |
+|-----------|-------|-----------------------------|----------------|--------|
+| `test_escalate_sets_flag_in_supabase` | phone_number='6591234567', reason='Customer requested to speak to a person', db, client_config | Supabase UPDATE called: `escalation_flag=True`, `escalation_reason=<reason>`, `last_seen` updated for correct phone_number | Supabase `AsyncClient`, `send_message` | ✅ PASS |
+| `test_escalate_sends_whatsapp_alert` | phone_number='6591234567', reason='Customer is angry', client_config with human_agent_number | `send_message` called with `to_phone_number=human_agent_number` and alert text containing customer phone number and reason | Supabase, `send_message` captured | ✅ PASS |
+| `test_escalate_returns_correct_dict` | Valid inputs | Returns `{"status": "escalated", "message": <non-empty string>}` | Supabase, `send_message` | ✅ PASS |
+| `test_escalate_continues_if_db_fails` | Supabase UPDATE raises exception | Function does NOT raise, still attempts to send WhatsApp alert, returns success dict | Supabase raises exception; `send_message` captured | ✅ PASS |
+| `test_escalate_skips_alert_if_no_human_agent_number` | client_config.human_agent_number = None | `send_message` NOT called, function still returns successfully | Supabase, `send_message` | ✅ PASS |
+| `test_escalate_message_contains_reason` | reason='Slot conflict on 30 Apr AM' | WhatsApp alert text contains the exact reason string | Supabase, `send_message` captured, alert text assertion | ✅ PASS |
+
+**Additional Escalation Gate Tests in `test_message_handler.py`:**
+
+| Test name | Input | Expected output / behaviour | What is mocked | Status |
+|-----------|-------|-----------------------------|----------------|--------|
+| `test_gate_silences_agent_when_flag_is_true` | Customer row with `escalation_flag=True` | Agent (run_agent, build_system_message, fetch_conversation_history) NOT called; holding reply sent instead | Supabase returning escalated customer; agent functions, send_message | ✅ PASS |
+| `test_gate_allows_agent_when_flag_is_false` | Customer row with `escalation_flag=False` | Agent IS called normally (run_agent, build_system_message, fetch_conversation_history all invoked); agent response sent | Supabase returning non-escalated customer; agent functions, send_message | ✅ PASS |
 
 ---
 

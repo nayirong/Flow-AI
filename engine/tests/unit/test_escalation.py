@@ -79,6 +79,9 @@ async def test_escalate_sends_whatsapp_alert(mock_send):
 
     db, _ = _make_db()
     cfg = _make_client_config(human_agent_number="6590000001")
+    
+    # Mock send_message to return wamid (new behavior)
+    mock_send.return_value = "wamid.alert123"
 
     await escalate_to_human(
         db=db,
@@ -291,3 +294,64 @@ async def test_escalate_triggers_sheets_sync_on_success(mock_send, mock_sheets_s
     call_kwargs = mock_sheets_sync.call_args[1]
     assert call_kwargs["client_id"] == "hey-aircon"
     assert call_kwargs["customer_data"]["escalation_flag"] is True
+
+
+@pytest.mark.asyncio
+@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+async def test_escalate_inserts_tracking_row(mock_send):
+    """
+    After escalation, a row is inserted into escalation_tracking with
+    phone_number, alert_msg_id, and escalation_reason.
+    """
+    from engine.core.tools.escalation_tool import escalate_to_human
+
+    customer_phone = "6591234567"
+    reason = "Customer requested refund"
+    
+    # Mock send_message to return wamid
+    mock_send.return_value = "wamid.alert456"
+    
+    # Create chainable mock for escalation_tracking table
+    tracking_chain = MagicMock()
+    tracking_chain.insert.return_value = tracking_chain
+    tracking_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+    
+    # Create chainable mock for customers table
+    customers_chain = MagicMock()
+    customers_chain.update.return_value = customers_chain
+    customers_chain.eq.return_value = customers_chain
+    customers_chain.select.return_value = customers_chain
+    customers_chain.limit.return_value = customers_chain
+    customers_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+    
+    # Root table() selector
+    db = MagicMock()
+    def table_selector(name):
+        if name == "escalation_tracking":
+            return tracking_chain
+        elif name == "customers":
+            return customers_chain
+        return MagicMock()
+    
+    db.table = MagicMock(side_effect=table_selector)
+    
+    cfg = _make_client_config()
+
+    await escalate_to_human(
+        db=db,
+        client_config=cfg,
+        phone_number=customer_phone,
+        reason=reason,
+    )
+
+    # Assert INSERT was called on escalation_tracking
+    tracking_chain.insert.assert_called_once()
+    insert_data = tracking_chain.insert.call_args[0][0]
+    
+    # Assert row contains required fields
+    assert insert_data["phone_number"] == customer_phone
+    assert insert_data["alert_msg_id"] == "wamid.alert456"
+    assert insert_data["escalation_reason"] == reason
+    
+    # Assert execute was called to persist the INSERT
+    tracking_chain.execute.assert_awaited_once()

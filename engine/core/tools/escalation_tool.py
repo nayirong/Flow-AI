@@ -109,6 +109,7 @@ async def escalate_to_human(
         # Continue — still send the human agent alert if possible.
 
     # ── Step 2: Notify human agent via WhatsApp ───────────────────────────────
+    alert_msg_id = None  # Will be populated if alert send succeeds
     if client_config.human_agent_number:
         try:
             from engine.integrations.meta_whatsapp import send_message
@@ -117,15 +118,21 @@ async def escalate_to_human(
                 phone_number=phone_number,
                 reason=reason,
             )
-            await send_message(
+            alert_msg_id = await send_message(
                 client_config=client_config,
                 to_phone_number=client_config.human_agent_number,
                 text=alert_text,
             )
-            logger.info(
-                f"Human agent alert sent to {client_config.human_agent_number} "
-                f"for customer {phone_number}"
-            )
+            if alert_msg_id:
+                logger.info(
+                    f"Human agent alert sent to {client_config.human_agent_number} "
+                    f"for customer {phone_number}, wamid={alert_msg_id}"
+                )
+            else:
+                logger.warning(
+                    f"Failed to send human agent alert for {phone_number} — "
+                    f"alert_msg_id will be NULL in escalation_tracking"
+                )
         except Exception as e:
             logger.error(
                 f"Failed to send human agent alert for {phone_number}: {e}",
@@ -147,6 +154,27 @@ async def escalate_to_human(
             f"No human_agent_number configured for client {client_config.client_id} "
             "— skipping human agent WhatsApp alert"
         )
+
+    # ── Step 3: Insert escalation tracking row ────────────────────────────────
+    try:
+        await (
+            db.table("escalation_tracking")
+            .insert({
+                "phone_number": phone_number,
+                "alert_msg_id": alert_msg_id,
+                "escalation_reason": reason,
+            })
+            .execute()
+        )
+        logger.info(
+            f"Escalation tracking row inserted for {phone_number}, alert_msg_id={alert_msg_id}"
+        )
+    except Exception as tracking_err:
+        logger.warning(
+            f"Failed to insert escalation_tracking row for {phone_number}: {tracking_err} — "
+            f"escalation flag is still set, but tracking audit is missing"
+        )
+        # Non-fatal — escalation flag is set, human agent alert may have been sent
 
     return {
         "status": "escalated",

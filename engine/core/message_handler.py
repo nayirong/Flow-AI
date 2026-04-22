@@ -61,6 +61,7 @@ async def handle_inbound_message(
     message_type: str,
     message_id: str,
     display_name: str,
+    context_message_id: str | None = None,
 ) -> None:
     """
     Full inbound message processing pipeline.
@@ -69,17 +70,33 @@ async def handle_inbound_message(
     All exceptions are caught — nothing propagates out of this function.
 
     Args:
-        client_id:    Client slug (e.g. "hey-aircon").
-        phone_number: Sender's WhatsApp number (E.164 without +, e.g. "6591234567").
-        message_text: Extracted message body (empty string for non-text types).
-        message_type: Meta message type string (e.g. "text", "image", "audio").
-        message_id:   Meta message ID (wamid.xxx).
-        display_name: Sender's WhatsApp display name.
+        client_id:           Client slug (e.g. "hey-aircon").
+        phone_number:        Sender's WhatsApp number (E.164 without +, e.g. "6591234567").
+        message_text:        Extracted message body (empty string for non-text types).
+        message_type:        Meta message type string (e.g. "text", "image", "audio").
+        message_id:          Meta message ID (wamid.xxx).
+        display_name:        Sender's WhatsApp display name.
+        context_message_id:  wamid of the message being replied to (None if not a reply).
     """
     try:
         # ── Step 1: Load client config and DB connection ──────────────────────
         client_config = await load_client_config(client_id)
         db = await get_client_db(client_id)
+
+        # ── Step 0: Human agent routing (inserted before inbound log) ─────────
+        if phone_number == client_config.human_agent_number:
+            logger.info(
+                f"Human agent message detected from {phone_number} (client: {client_id})"
+            )
+            from engine.core.reset_handler import handle_human_agent_message
+            await handle_human_agent_message(
+                db=db,
+                client_config=client_config,
+                phone_number=phone_number,
+                message_text=message_text,
+                context_message_id=context_message_id,
+            )
+            return  # Do NOT log to interactions_log, do NOT run agent
 
         now = datetime.now(timezone.utc).isoformat()
 

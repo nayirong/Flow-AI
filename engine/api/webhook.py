@@ -114,6 +114,9 @@ async def receive_whatsapp_message(
             phone_number = message["from"]
             message_id = message["id"]
             message_type = message["type"]
+            
+            # Extract context.id for reply-to-message detection
+            context_message_id = message.get("context", {}).get("id")
 
             if message_type == "text":
                 message_text = message["text"]["body"]
@@ -144,6 +147,7 @@ async def receive_whatsapp_message(
             message_type,
             message_id,
             display_name,
+            context_message_id,
         )
 
         # 6. Return 200 immediately — before background task executes

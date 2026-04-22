@@ -6,6 +6,7 @@ Slice 3: send_message()
 """
 import logging
 import re
+from typing import Optional
 
 import httpx
 
@@ -43,7 +44,7 @@ async def send_message(
     client_config: ClientConfig,
     to_phone_number: str,
     text: str,
-) -> bool:
+) -> Optional[str]:
     """
     Send a WhatsApp text message via Meta Cloud API.
 
@@ -53,7 +54,7 @@ async def send_message(
         text:            Message body text.
 
     Returns:
-        True if message sent successfully, False otherwise.
+        wamid (str) if message sent successfully, None otherwise.
         Never raises — caller checks return value.
     """
     text = _convert_markdown_to_whatsapp(text)
@@ -77,18 +78,29 @@ async def send_message(
             response = await http_client.post(url, headers=headers, json=payload)
 
         if response.status_code == 200:
-            logger.info(f"Message sent successfully to {to_phone_number}")
-            return True
+            # Extract wamid from Meta API response
+            try:
+                response_data = response.json()
+                wamid = response_data["messages"][0]["id"]
+                logger.info(f"Message sent successfully to {to_phone_number}, wamid={wamid}")
+                return wamid
+            except (KeyError, IndexError, ValueError) as e:
+                # JSON parse error or unexpected structure — treat as failure
+                logger.error(
+                    f"Failed to extract wamid from Meta response for {to_phone_number}: {e}, "
+                    f"body={response.text[:200]}"
+                )
+                return None
 
         logger.error(
             f"Meta API error sending to {to_phone_number}: "
             f"status={response.status_code}, body={response.text[:200]}"
         )
-        return False
+        return None
 
     except Exception as e:
         logger.error(
             f"Failed to send WhatsApp message to {to_phone_number}: {e}",
             exc_info=True,
         )
-        return False
+        return None

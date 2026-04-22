@@ -9,6 +9,7 @@ This directory contains architecture documents for the Flow AI platform and clie
 - `service_variations_spec.md` — Service variations clarification flow: config naming convention, context_builder PRICING section logic, Supabase SQL, acceptance criteria cross-reference
 - `google_sheets_sync.md` — Google Sheets data sync architecture: post-write sync for customers + bookings, fire-and-forget error handling, linear scan deduplication, gspread integration, Phase 2 decommission path
 - `address_schema_migration.md` — ADR: move `address` + `postal_code` from `customers` to `bookings`; three-phase migration plan with DDL, write_booking() change spec, rollback notes, and edge cases
+- `escalation_reset.md` — ADR + implementation spec for escalation reset via WhatsApp reply-to-message: `escalation_tracking` table, `send_message()` return type change, `reset_handler` module, human agent routing, keyword validation, audit trail
 
 ### Source documents (read before producing architecture)
 - `clients/hey-aircon/plans/build/00_architecture_reference.md` — current n8n architecture (living reference)

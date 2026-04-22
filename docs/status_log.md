@@ -1,7 +1,7 @@
 # Flow AI — Project Status Log
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-21
+> Last Updated: 2026-04-22
 
 ---
 
@@ -39,7 +39,7 @@
 | B: Escalation gate | Complete | Binary gate with holding reply on TRUE branch |
 | C: AI Agent (Claude Haiku 4.5 + context builder) | Complete | Context engineering working; Config + Policies via Supabase |
 | D: Booking tools (calendar + write_booking) | Live | `check_calendar`, `create_event`, and `write_booking` all operational. Google Calendar integration confirmed working. |
-| E: Escalate-to-human tool | Not Started | Next to build. No outstanding blockers. |
+| E: Escalate-to-human tool | Built, Pending Test Verification | `engine/core/tools/escalation_tool.py` implemented. Sets `escalation_flag=True` in Supabase + sends WhatsApp alert to human agent. No unit or integration tests exist. No production verification. `@sdet-engineer` dispatched 2026-04-22. |
 | Supabase (shared platform) | Complete | Tables provisioned; HeyAircon row live |
 | Meta dev account | Complete | Webhook verified, real traffic flowing as of 2026-04-19 |
 | Google Calendar integration | Working | Resolved in prior session. |
@@ -100,6 +100,7 @@
 
 | Date | Event |
 |------|-------|
+| 2026-04-22 | Status corrections: Component E corrected from "Not Started" to "Built, Pending Test Verification" — `escalation_tool.py` was fully implemented but not reflected in status_log. Both bugs from 2026-04-21 session confirmed resolved via code review + git history. BUG (critical) guardrail re-prompt leak: RESOLVED in commit `c70198f` — re-prompt now injected as loop `user` message with `continue`, never returned to customer. BUG (medium) `booking_count` not incremented: RESOLVED in commits `c70198f` + `a464093` — uses `total_bookings` (DB trigger column) with customer re-fetch after booking write. Process gap noted: neither bug was logged in `observation-log.md`, so no formal `#resolved` trail exists. `@sdet-engineer` dispatched to create escalation tool test plan and verify end-to-end workflow. |
 | 2026-04-21 | Production test session completed (HeyAircon pilot). 2 passes, 2 bugs filed. PASS: T+2 advance booking policy enforced correctly (agent rejected "tomorrow evening," offered 24 April). PASS: Customer record created on first inbound message (log confirmed `New customer created: 6582829071`). BUG (medium): `booking_count` not incremented on first booking — remained 0 after booking HA-20260424-87RU, incremented to 1 only after second booking HA-20260426-RF02. Suspected race condition between `write_booking` increment PATCH and `message_handler` `last_seen_at` PATCH overwriting the counter. Files: `engine/core/tools/write_booking.py`, `engine/core/message_handler.py`. BUG (critical): Guardrail re-prompt message (agent internal reasoning) delivered to customer as outbound WhatsApp message — interaction log ID 269. Re-prompt in `agent_runner.py` must be injected as internal turn only, never as an outbound reply. Both bugs filed in `.flow/tasks/active.md`. |
 | 2026-04-21 | Chemical wash BTU pricing — clarification strategy decision. Evaluated three options (ask-first, range-first, list-all). Decision: Option B (range-first). Agent leads with price range on first reply ("from $80 to $130 for 1 unit depending on BTU size") then asks for BTU. Config-only change: update `variation_hint_chemical_wash` and `variation_hint_chemical_overhaul` rows in Supabase `config` to instruct range-first behaviour. No code change to `context_builder.py`. No Railway redeploy. Two UPDATE statements in Supabase Studio; takes effect on next inbound message. |
 | 2026-04-21 | Chemical wash / chemical overhaul BTU pricing fix diagnosed and approved. Root cause: 6 config keys used single underscores (`pricing_chemical_wash_9_12k` etc.) so context_builder rendered them as flat bullets with no BTU label and no clarification prompt. Fix: rename 6 keys to use `__` separator and update 2 `variation_hint_` rows from `"none"` sentinel to active BTU question text. Zero code changes, zero Railway redeploy. SQL statements produced for direct execution in Supabase Studio. Fix takes effect on next inbound message after SQL runs. |

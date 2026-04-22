@@ -15,7 +15,7 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 
 | Agent | Owns | Key Files |
 |-------|------|-----------|
-| chief-of-staff | `docs/status_log.md`, `AGENTS.md` | This file; `/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/docs/status_log.md` |
+| chief-of-staff | `docs/status_log.md`, `AGENTS.md`, `docs/observability/observation-log.md` | This file; `/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/docs/status_log.md`; observation log: `docs/observability/observation-log.md` |
 | product-manager | `docs/requirements/` | Not yet created — see gap audit |
 | ux-ui-designer | `docs/ux-ui-spec/` | Not yet created |
 | software-architect | `docs/architecture/`, `docs/observability/` | `docs/architecture/00_platform_architecture.md` (platform engine architecture, live); `docs/architecture/code_map.md` (cold-start file index, all 15 engine files, Supabase data flow, where-to-look table); `docs/observability/sql-reference.md` (operational SQL queries for monitoring, 2026-04-21) |
@@ -140,6 +140,7 @@ These are the bill-to fields for HeyAircon invoices. Pass these at call time whe
 |------|-----------|
 | Understanding which code file handles what | `docs/architecture/code_map.md` |
 | Monitoring API usage, incidents, guardrails, or writing SQL analytics queries | `docs/observability/sql-reference.md` |
+| Reviewing founder testing observations, picking up `#needs-review` entries, dispatching to agents | `docs/observability/observation-log.md` |
 
 ---
 
