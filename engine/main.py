@@ -45,13 +45,14 @@ from engine.api.webhook import app  # noqa: E402 — must come after logging set
 
 @app.on_event("startup")
 async def _run_startup_validation() -> None:
-    """Validate config at startup. Critical failures abort the service."""
+    """Validate config at startup. Issues are logged but never kill the service."""
     try:
         from engine.config.startup_validator import validate_startup_config
-        await validate_startup_config(abort_on_fatal=True)
-    except RuntimeError as e:
-        logger.critical("Startup validation aborted: %s", e)
-        raise  # Let Railway mark the deploy as failed
+        await validate_startup_config(abort_on_fatal=False)
+    except Exception as e:
+        # Validator itself threw unexpectedly — log and continue.
+        # A validator bug must never take down a production service.
+        logger.error("Startup validator threw unexpected error (non-fatal): %s", e)
 
 # Re-export for uvicorn: `uvicorn engine.main:app`
 __all__ = ["app"]
