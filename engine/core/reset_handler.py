@@ -147,10 +147,13 @@ async def handle_human_agent_message(
     customer_phone = escalation_row["phone_number"]
 
     try:
-        # Update customers table — clear flag
+        # Update customers table — clear flag and reset notified state
         await (
             db.table("customers")
-            .update({"escalation_flag": False})
+            .update({
+                "escalation_flag": False,
+                "escalation_notified": False,
+            })
             .eq("phone_number", customer_phone)
             .execute()
         )

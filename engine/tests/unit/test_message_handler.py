@@ -135,15 +135,48 @@ async def test_escalated_customer_logs_outbound(
 async def test_escalated_customer_stops_pipeline(
     mock_load_config, mock_get_db, mock_send, mock_client_config_obj
 ):
-    """Pipeline returns after escalation gate — customer upsert must NOT happen."""
+    """Pipeline returns after escalation gate — customer upsert (step 5) must NOT happen.
+    update() IS called once to flip escalation_notified=True — that is the gate itself,
+    not the upsert. Assert that the holding reply is sent and step 5 is not reached."""
     mock_load_config.return_value = mock_client_config_obj
-    escalated = {"phone_number": "6591234567", "escalation_flag": True}
+    escalated = {"phone_number": "6591234567", "escalation_flag": True, "escalation_notified": False}
     db, chain = _make_db(customer_row=escalated)
     mock_get_db.return_value = db
 
     await handle_inbound_message(**_PARAMS)
 
-    # update() would only be called in step 5 (upsert) — must not be reached.
+    # Holding reply sent once.
+    mock_send.assert_awaited_once()
+    # update() called exactly once — to flip escalation_notified=True (gate, not upsert).
+    chain.update.assert_called_once_with({"escalation_notified": True})
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+async def test_escalated_already_notified_silent_drop(
+    mock_load_config, mock_get_db, mock_send, mock_run_agent, mock_client_config_obj
+):
+    """Subsequent messages from an already-notified escalated customer are silently dropped.
+    No holding reply, no agent call, no update."""
+    mock_load_config.return_value = mock_client_config_obj
+    already_notified = {
+        "phone_number": "6591234567",
+        "escalation_flag": True,
+        "escalation_notified": True,
+    }
+    db, chain = _make_db(customer_row=already_notified)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message(**_PARAMS)
+
+    # No reply sent to customer.
+    mock_send.assert_not_awaited()
+    # Agent not invoked.
+    mock_run_agent.assert_not_awaited()
+    # No update calls (nothing to flip — already notified).
     chain.update.assert_not_called()
 
 

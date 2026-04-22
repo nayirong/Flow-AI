@@ -61,6 +61,7 @@ async def escalate_to_human(
             db.table("customers")
             .update({
                 "escalation_flag": True,
+                "escalation_notified": False,
                 "escalation_reason": reason,
                 "last_seen": now,
             })

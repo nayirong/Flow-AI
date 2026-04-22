@@ -152,6 +152,17 @@ async def handle_inbound_message(
 
         # ── Step 4: Hard escalation gate (programmatic — never an agent decision) ──
         if customer_row and customer_row.get("escalation_flag") is True:
+            already_notified = customer_row.get("escalation_notified", False)
+            if already_notified:
+                # Holding reply already sent for this escalation — silently drop.
+                # Human agent is handling the conversation directly; no reply needed.
+                logger.info(
+                    f"Escalation gate BLOCKED (silent) for {phone_number} (client: {client_id}) — "
+                    f"holding reply already sent, dropping message"
+                )
+                return
+
+            # First message since escalation — send holding reply once.
             logger.info(
                 f"Escalation gate BLOCKED for {phone_number} (client: {client_id}) — "
                 f"reason: {customer_row.get('escalation_reason', 'not set')}"
@@ -166,6 +177,10 @@ async def handle_inbound_message(
                     "message_text": HOLDING_REPLY,
                     "message_type": "text",
                 }).execute()
+                # Mark notified so subsequent messages are silently dropped.
+                await db.table("customers").update({
+                    "escalation_notified": True,
+                }).eq("phone_number", phone_number).execute()
             except Exception as e:
                 logger.error(
                     f"Failed to send/log holding reply to {phone_number}: {e}",
