@@ -6,7 +6,7 @@ traffic. Logs warnings for missing optional config and raises on missing
 required config so Railway fails fast rather than serving broken requests.
 
 Checks performed:
-  1. Required env vars are present (SUPABASE_URL, SUPABASE_SERVICE_KEY)
+  1. Required env vars are present (SHARED_SUPABASE_URL, SHARED_SUPABASE_SERVICE_KEY)
   2. Shared Supabase DB is reachable (ping api_usage table)
   3. Per-client config in the clients table is reachable for active clients
   4. human_agent_number is set and does not match known test-number patterns
@@ -36,8 +36,8 @@ _KNOWN_TEST_PHONE_PATTERN = re.compile(
 )
 
 _REQUIRED_SHARED_ENV_VARS = [
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_KEY",
+    "SHARED_SUPABASE_URL",
+    "SHARED_SUPABASE_SERVICE_KEY",
 ]
 
 _KNOWN_LLM_PROVIDERS = {"anthropic", "openai", "github_models"}
@@ -112,7 +112,7 @@ async def validate_startup_config(abort_on_fatal: bool = True) -> list[dict]:
         await db.table("api_usage").select("id").limit(1).execute()
         logger.info("[startup_validator] Shared Supabase reachable ✓")
     except Exception as e:
-        _critical(
+        _warn(
             check="shared_supabase_reachable",
             detail=f"Cannot connect to shared Supabase: {type(e).__name__}: {e}",
         )
