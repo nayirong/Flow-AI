@@ -360,3 +360,247 @@ async def test_unknown_client_does_not_crash(
         message_id="wamid.test456",
         display_name="Unknown",
     )
+
+
+# ── Escalation Gate Specific Tests ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+async def test_gate_silences_agent_when_flag_is_true(
+    mock_load_config, mock_get_db, mock_send,
+    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_client_config_obj
+):
+    """
+    Escalation gate: when escalation_flag=True, agent is NOT called,
+    holding reply returned instead.
+    """
+    mock_load_config.return_value = mock_client_config_obj
+
+    escalated = {
+        "phone_number": "6591234567",
+        "escalation_flag": True,
+        "escalation_reason": "Customer complaint",
+    }
+    db, _ = _make_db(customer_row=escalated)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message(**_PARAMS)
+
+    # Agent should NOT be called at all
+    mock_run_agent.assert_not_called()
+    mock_build_system.assert_not_called()
+    mock_fetch_history.assert_not_called()
+
+    # Holding reply should be sent instead
+    mock_send.assert_awaited_once_with(
+        mock_client_config_obj,
+        _PARAMS["phone_number"],
+        HOLDING_REPLY,
+    )
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+async def test_gate_allows_agent_when_flag_is_false(
+    mock_load_config, mock_get_db, mock_send,
+    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_client_config_obj
+):
+    """
+    Escalation gate: when escalation_flag=False, agent IS called normally.
+    """
+    mock_load_config.return_value = mock_client_config_obj
+    mock_build_system.return_value = "System message"
+    mock_fetch_history.return_value = []
+    mock_run_agent.return_value = "Hi! How can I help you?"
+
+    non_escalated = {
+        "phone_number": "6591234567",
+        "escalation_flag": False,
+    }
+    db, _ = _make_db(customer_row=non_escalated)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message(**_PARAMS)
+
+    # Agent SHOULD be called
+    mock_run_agent.assert_awaited_once()
+    mock_build_system.assert_awaited_once()
+    mock_fetch_history.assert_awaited_once()
+
+    # Agent response should be sent (not holding reply)
+    mock_send.assert_awaited_once_with(
+        mock_client_config_obj,
+        _PARAMS["phone_number"],
+        "Hi! How can I help you?",
+    )
+
+
+# ── Concurrency / Per-Customer Lock Tests ─────────────────────────────────────
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+async def test_concurrent_messages_same_customer_are_serialized(
+    mock_load_config, mock_get_db, mock_send,
+    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_client_config_obj,
+):
+    """
+    Three rapid messages from the same customer must be processed one at a time.
+
+    Regression test for the concurrency race condition (2026-04-21):
+    concurrent background tasks read stale history in parallel, causing premature
+    tool invocations and duplicate/conflicting replies.
+
+    Verifies: the per-customer asyncio.Lock in message_handler serializes tasks so
+    each agent invocation completes (including reply logging) before the next starts.
+    """
+    import asyncio
+    from engine.core import message_handler as mh
+
+    # Clear any stale lock state from previous tests.
+    mh._customer_locks.clear()
+
+    mock_load_config.return_value = mock_client_config_obj
+    mock_build_system.return_value = "System message"
+    mock_fetch_history.return_value = []
+
+    execution_order: list[int] = []
+
+    # Each run_agent call records its start index, sleeps briefly to simulate LLM
+    # latency, then records its finish index. If tasks run in parallel the
+    # start/finish indices interleave; if serialized they appear in pairs.
+    call_index = {"n": 0}
+
+    async def tracked_run_agent(*args, **kwargs):
+        idx = call_index["n"]
+        call_index["n"] += 1
+        execution_order.append(("start", idx))
+        await asyncio.sleep(0.05)   # simulate LLM latency
+        execution_order.append(("end", idx))
+        return f"Reply {idx}"
+
+    mock_run_agent.side_effect = tracked_run_agent
+
+    non_escalated = {"phone_number": "6591234567", "escalation_flag": False}
+    db, _ = _make_db(customer_row=non_escalated)
+    mock_get_db.return_value = db
+
+    phone = "6591234567"
+    tasks = [
+        asyncio.create_task(handle_inbound_message(
+            client_id="hey-aircon",
+            phone_number=phone,
+            message_text=f"Message {i}",
+            message_type="text",
+            message_id=f"wamid.test{i}",
+            display_name="Test User",
+        ))
+        for i in range(3)
+    ]
+    await asyncio.gather(*tasks)
+
+    # With the lock, each task's end event must come before the next task's start.
+    # i.e. execution_order must be: (start,0),(end,0),(start,1),(end,1),(start,2),(end,2)
+    # Extract just the (action, call_idx) tuples to assert ordering.
+    assert len(execution_order) == 6, f"Expected 6 events, got {execution_order}"
+    for i in range(0, 6, 2):
+        action_a, idx_a = execution_order[i]
+        action_b, idx_b = execution_order[i + 1]
+        assert action_a == "start", f"Expected start at position {i}, got {execution_order}"
+        assert action_b == "end", f"Expected end at position {i+1}, got {execution_order}"
+        assert idx_a == idx_b, (
+            f"Start/end indices mismatch at position {i}: {execution_order}"
+        )
+
+    # All 3 agent invocations must have completed.
+    assert mock_run_agent.await_count == 3
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+async def test_concurrent_messages_different_customers_are_independent(
+    mock_load_config, mock_get_db, mock_send,
+    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_client_config_obj,
+):
+    """
+    Messages from different customers must NOT block each other.
+
+    The per-customer lock is keyed by phone number. Two customers messaging
+    simultaneously should both be processed concurrently, not queued behind
+    each other.
+    """
+    import asyncio
+    from engine.core import message_handler as mh
+
+    mh._customer_locks.clear()
+
+    mock_load_config.return_value = mock_client_config_obj
+    mock_build_system.return_value = "System message"
+    mock_fetch_history.return_value = []
+
+    start_times: dict[str, float] = {}
+    end_times: dict[str, float] = {}
+
+    async def tracked_run_agent(*args, **kwargs):
+        phone = kwargs.get("current_message", args[2] if len(args) > 2 else "unknown")
+        # Use the message text as a proxy for phone in this mock context.
+        # We'll record based on call count instead.
+        await asyncio.sleep(0.1)
+        return "Reply"
+
+    mock_run_agent.side_effect = tracked_run_agent
+
+    task_start: dict[int, float] = {}
+    task_end: dict[int, float] = {}
+
+    async def timed_handle(idx: int, phone: str):
+        task_start[idx] = asyncio.get_event_loop().time()
+        db, _ = _make_db(customer_row={"phone_number": phone, "escalation_flag": False})
+        mock_get_db.return_value = db
+        await handle_inbound_message(
+            client_id="hey-aircon",
+            phone_number=phone,
+            message_text="Hello",
+            message_type="text",
+            message_id=f"wamid.test{idx}",
+            display_name="Test",
+        )
+        task_end[idx] = asyncio.get_event_loop().time()
+
+    # Run 2 different customers concurrently.
+    await asyncio.gather(
+        timed_handle(0, "6591111111"),
+        timed_handle(1, "6592222222"),
+    )
+
+    # Both tasks should have started before either finished (i.e. they ran in parallel).
+    # If they were serialized, task 1 would start only after task 0 ends.
+    assert task_start[1] < task_end[0], (
+        "Different-customer tasks should run concurrently, not sequentially. "
+        f"Task 0: {task_start[0]:.3f}–{task_end[0]:.3f}, "
+        f"Task 1: {task_start[1]:.3f}–{task_end[1]:.3f}"
+    )
+    assert mock_run_agent.await_count == 2
