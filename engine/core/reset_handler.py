@@ -159,6 +159,7 @@ async def handle_human_agent_message(
         )
 
         # Update escalation_tracking — mark resolved
+        import asyncio
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         await (
@@ -175,6 +176,29 @@ async def handle_human_agent_message(
             f"Escalation cleared for {customer_phone} by {phone_number} "
             f"(tracking_id={escalation_row['id']})"
         )
+
+        # Sync updated customer row to Google Sheets (fire-and-forget).
+        # Ensures CRM reflects escalation_flag=False immediately on reset,
+        # without waiting for the customer's next inbound message.
+        try:
+            from engine.integrations.google_sheets import sync_customer_to_sheets
+            row_result = await (
+                db.table("customers")
+                .select("*")
+                .eq("phone_number", customer_phone)
+                .limit(1)
+                .execute()
+            )
+            if row_result.data:
+                asyncio.create_task(sync_customer_to_sheets(
+                    client_id=client_config.client_id,
+                    client_config=client_config,
+                    customer_data=row_result.data[0],
+                ))
+        except Exception as sheets_err:
+            logger.warning(
+                f"Sheets sync failed after escalation reset for {customer_phone}: {sheets_err}"
+            )
 
     except Exception as e:
         logger.error(
