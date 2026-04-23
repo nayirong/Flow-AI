@@ -14,6 +14,7 @@ The webhook has already returned 200 to Meta before this function runs.
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 from engine.config.client_config import load_client_config, ClientNotFoundError
@@ -52,6 +53,79 @@ FALLBACK_REPLY = (
     "Please try again in a moment, or call us directly. "
     "We apologise for the inconvenience."
 )
+
+_AFFIRMATIVE_CONFIRMATION_PATTERNS = [
+    "yes",
+    "y",
+    "ok",
+    "okay",
+    "confirm",
+    "confirmed",
+    "sure",
+    "correct",
+    "yep",
+    "yup",
+    "go ahead",
+    "sounds good",
+    "looks good",
+    "yes please",
+    "ok can",
+    "can",
+]
+
+
+def _is_affirmative_confirmation(message_text: str) -> bool:
+    """Return True when the inbound is a plain confirmation to a pending summary."""
+    normalised = re.sub(r"[^a-z0-9\s]+", " ", (message_text or "").lower())
+    normalised = " ".join(normalised.split())
+    return normalised in _AFFIRMATIVE_CONFIRMATION_PATTERNS
+
+
+def _remove_current_inbound_from_history(
+    history: list[dict],
+    current_message: str,
+) -> list[dict]:
+    """Drop the just-logged inbound row so the LLM does not see it twice."""
+    if not history:
+        return history
+
+    last_message = history[-1]
+    if (
+        last_message.get("role") == "user"
+        and (last_message.get("content") or "") == current_message
+    ):
+        return history[:-1]
+    return history
+
+
+async def _get_latest_pending_booking(db, phone_number: str) -> dict | None:
+    """Fetch the newest pending_confirmation booking for this customer."""
+    try:
+        result = await (
+            db.table("bookings")
+            .select("booking_id, service_type, slot_date, slot_window, address, postal_code, created_at")
+            .eq("phone_number", phone_number)
+            .eq("booking_status", "pending_confirmation")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch latest pending booking for %s: %s",
+            phone_number,
+            e,
+            exc_info=True,
+        )
+        return None
+
+    if not result.data:
+        return None
+
+    booking = result.data[0]
+    if not booking.get("booking_id"):
+        return None
+    return booking
 
 
 async def handle_inbound_message(
@@ -255,27 +329,51 @@ async def handle_inbound_message(
         )
         async with _get_customer_lock(phone_number):
             try:
-                system_message = await build_system_message(db)
-                known_name = (customer_row or {}).get("customer_name") if customer_row else None
-                if known_name:
-                    system_message += (
-                        f"\n\nCURRENT CUSTOMER:\n"
-                        f"Name: {known_name}\n"
-                        f"Use this name when calling write_booking — do NOT ask the customer "
-                        f"for their name again unless they say it has changed.\n"
-                    )
-                history = await fetch_conversation_history(db, phone_number)
                 tool_dispatch = build_tool_dispatch(db, client_config, phone_number)
-                agent_reply = await run_agent(
-                    system_message=system_message,
-                    conversation_history=history,
-                    current_message=message_text,
-                    tool_definitions=TOOL_DEFINITIONS,
-                    tool_dispatch=tool_dispatch,
-                    client_id=client_id,
-                    anthropic_api_key=client_config.anthropic_api_key,
-                    openai_api_key=client_config.openai_api_key,
-                )
+                pending_booking = await _get_latest_pending_booking(db, phone_number)
+
+                if pending_booking and _is_affirmative_confirmation(message_text):
+                    logger.info(
+                        "Affirmative confirmation detected for pending booking %s — bypassing LLM",
+                        pending_booking["booking_id"],
+                    )
+                    confirm_result = await tool_dispatch["confirm_booking"](
+                        booking_id=pending_booking["booking_id"]
+                    )
+                    agent_reply = confirm_result.get("message") or FALLBACK_REPLY
+                else:
+                    system_message = await build_system_message(db)
+                    known_name = (customer_row or {}).get("customer_name") if customer_row else None
+                    if known_name:
+                        system_message += (
+                            f"\n\nCURRENT CUSTOMER:\n"
+                            f"Name: {known_name}\n"
+                            f"Use this name when calling write_booking — do NOT ask the customer "
+                            f"for their name again unless they say it has changed.\n"
+                        )
+                    if pending_booking:
+                        system_message += (
+                            "\n\nLATEST PENDING BOOKING:\n"
+                            f"Reference: {pending_booking['booking_id']}\n"
+                            f"Service: {pending_booking['service_type']}\n"
+                            f"Date: {pending_booking['slot_date']}\n"
+                            f"Time: {pending_booking['slot_window']}\n"
+                            f"Address: {pending_booking['address']}, Singapore {pending_booking['postal_code']}\n"
+                            "If the customer is affirming this pending booking summary, call confirm_booking "
+                            "with this exact booking_id. Do NOT call write_booking again for the same pending booking.\n"
+                        )
+                    history = await fetch_conversation_history(db, phone_number)
+                    history = _remove_current_inbound_from_history(history, message_text)
+                    agent_reply = await run_agent(
+                        system_message=system_message,
+                        conversation_history=history,
+                        current_message=message_text,
+                        tool_definitions=TOOL_DEFINITIONS,
+                        tool_dispatch=tool_dispatch,
+                        client_id=client_id,
+                        anthropic_api_key=client_config.anthropic_api_key,
+                        openai_api_key=client_config.openai_api_key,
+                    )
             except Exception as e:
                 logger.error(
                     f"Agent error for {phone_number} (client: {client_id}): {e}",

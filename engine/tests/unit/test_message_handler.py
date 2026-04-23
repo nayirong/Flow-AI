@@ -228,6 +228,89 @@ async def test_returning_customer_last_seen_updated(
 @patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
 @patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
 @patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+async def test_current_inbound_removed_from_history_before_agent(
+    mock_load_config, mock_get_db, mock_send,
+    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_client_config_obj,
+):
+    """The just-logged inbound message must not be duplicated into LLM history."""
+    mock_load_config.return_value = mock_client_config_obj
+    mock_build_system.return_value = "System message"
+    mock_fetch_history.return_value = [
+        {"role": "assistant", "content": "Please reply yes to confirm your appointment."},
+        {"role": "user", "content": _PARAMS["message_text"]},
+    ]
+    mock_run_agent.return_value = "Hi! How can I help you?"
+
+    existing = {"phone_number": "6591234567", "escalation_flag": False}
+    db, _ = _make_db(customer_row=existing)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message(**_PARAMS)
+
+    passed_history = mock_run_agent.await_args.kwargs["conversation_history"]
+    assert passed_history == [
+        {"role": "assistant", "content": "Please reply yes to confirm your appointment."}
+    ]
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+@patch("engine.core.message_handler._get_latest_pending_booking", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_tool_dispatch")
+async def test_affirmative_pending_confirmation_bypasses_llm(
+    mock_build_tool_dispatch,
+    mock_get_pending_booking,
+    mock_load_config, mock_get_db, mock_send,
+    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_client_config_obj,
+):
+    """A plain yes/confirm reply should confirm the latest pending booking directly."""
+    mock_load_config.return_value = mock_client_config_obj
+    mock_get_pending_booking.return_value = {
+        "booking_id": "HA-20260427-ABCD",
+        "service_type": "General Servicing",
+        "slot_date": "2026-04-27",
+        "slot_window": "AM",
+        "address": "123 Test Street",
+        "postal_code": "123456",
+    }
+    mock_confirm = AsyncMock(return_value={
+        "status": "confirmed",
+        "booking_id": "HA-20260427-ABCD",
+        "message": "✅ Your booking is confirmed! Reference: HA-20260427-ABCD.",
+    })
+    mock_build_tool_dispatch.return_value = {"confirm_booking": mock_confirm}
+
+    existing = {"phone_number": "6591234567", "escalation_flag": False}
+    db, _ = _make_db(customer_row=existing)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message(
+        **{**_PARAMS, "message_text": "yes"}
+    )
+
+    mock_confirm.assert_awaited_once_with(booking_id="HA-20260427-ABCD")
+    mock_run_agent.assert_not_awaited()
+    mock_send.assert_awaited_once_with(
+        mock_client_config_obj,
+        _PARAMS["phone_number"],
+        "✅ Your booking is confirmed! Reference: HA-20260427-ABCD.",
+    )
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
 async def test_non_escalated_customer_agent_is_invoked(
     mock_load_config, mock_get_db, mock_send,
     mock_build_system, mock_fetch_history, mock_run_agent,
