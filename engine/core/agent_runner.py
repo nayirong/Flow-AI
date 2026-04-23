@@ -50,7 +50,6 @@ _BOOKING_CONFIRMATION_KEYWORDS = [
     "all set",
     "appointment is set",
     "see you on",
-    "your booking",
     "has been scheduled",
     "we'll see you",
     "we will see you",
@@ -545,6 +544,8 @@ async def run_agent(
                             "unit_count, address, postal_code, slot_date, slot_window. BTU size, aircon brand, "
                             "and other optional details are NOT required — do not block on them. "
                             "If you have all 7 required fields, call write_booking immediately. "
+                            "CRITICAL: Use the EXACT slot_window (AM or PM) that the customer most recently stated. "
+                            "Do NOT switch to a different slot_window. "
                             "(2) Only if one of those 7 required fields is genuinely unknown, call escalate_to_human. "
                             "Do not ask the customer for more information."
                         ),
