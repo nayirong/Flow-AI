@@ -10,9 +10,16 @@ on:
 
 jobs:
   deploy:
-    name: Trigger Railway Deploy
+    name: Deploy to Railway via CLI
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Railway deploy hook
-        run: |
-          curl --fail -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_HEYAIRCON }}"
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        run: railway up --service "${{ secrets.RAILWAY_SERVICE_ID }}" --environment production --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
