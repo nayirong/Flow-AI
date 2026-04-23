@@ -85,13 +85,9 @@ async def validate_startup_config(abort_on_fatal: bool = True) -> list[dict]:
             detail=f"Unknown LLM_PROVIDER='{provider}'. Known values: {sorted(_KNOWN_LLM_PROVIDERS)}",
         )
 
-    # ── Check 3: LLM_FALLBACK_ENABLED=true requires OPENAI_API_KEY ───────────
-    fallback_enabled = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() != "false"
-    if fallback_enabled and not os.environ.get("OPENAI_API_KEY", "").strip():
-        _warn(
-            check="openai_fallback_key",
-            detail="LLM_FALLBACK_ENABLED=true but OPENAI_API_KEY is not set — fallback will fail",
-        )
+    # ── Check 3: LLM_FALLBACK_ENABLED sanity ─────────────────────────────────
+    # Per-client OpenAI keys ({CLIENT_ID_UPPER}_OPENAI_API_KEY) are loaded on demand
+    # from ClientConfig — not available at startup time. No global key check needed.
 
     # ── Check 4: Telegram alert config is complete ────────────────────────────
     tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()

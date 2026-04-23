@@ -363,7 +363,7 @@ async def run_agent(
         Final agent response text. Returns _FALLBACK_RESPONSE if both providers fail —
         message_handler will send this to the customer as a technical error message.
     """
-    from engine.integrations.observability import log_incident, log_usage, extract_usage
+    from engine.integrations.observability import log_incident, log_usage, extract_usage, send_telegram_alert
 
     client = _get_llm_client(anthropic_api_key=anthropic_api_key)
     model = _get_model_name()
@@ -405,10 +405,15 @@ async def run_agent(
             )
         except Exception as llm_err:
             is_anthropic_primary = active_provider == "anthropic"
-            is_retryable = (
-                "APIConnectionError" in type(llm_err).__name__
-                or "APIStatusError" in type(llm_err).__name__
-                or "TimeoutError" in type(llm_err).__name__
+            # Match any Anthropic SDK error by checking the class hierarchy, not just
+            # the leaf class name. AuthenticationError, RateLimitError, etc. are all
+            # subclasses of APIError — all should trigger fallback.
+            is_retryable = any(
+                "APIConnectionError" in c.__name__
+                or "APIStatusError" in c.__name__
+                or "APIError" in c.__name__
+                or "TimeoutError" in c.__name__
+                for c in type(llm_err).__mro__
             )
 
             if is_anthropic_primary and is_retryable and fallback_enabled:
@@ -459,6 +464,18 @@ async def run_agent(
                         "Both Anthropic and OpenAI failed — client_id=%s anthropic=%s openai=%s",
                         client_id, type(llm_err).__name__, type(fallback_err).__name__,
                     )
+                    try:
+                        await send_telegram_alert(
+                            title="LLM Total Failure",
+                            source="llm_both_failed",
+                            client_id=client_id,
+                            error_type=type(fallback_err).__name__,
+                            error_message=str(fallback_err),
+                            context={"providers_failed": "Anthropic + OpenAI"},
+                            action_note="Customer received fallback reply. Agent could not respond.\nMonitor Anthropic/OpenAI status pages.",
+                        )
+                    except Exception:
+                        pass
                     return _FALLBACK_RESPONSE
                 finally:
                     # Always restore provider so next message retries Anthropic first
