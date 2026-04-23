@@ -15,6 +15,7 @@ Usage in message_handler.py:
 from engine.core.tools.definitions import TOOL_DEFINITIONS
 from engine.core.tools.calendar_tools import check_calendar_availability
 from engine.core.tools.booking_tools import write_booking, get_customer_bookings
+from engine.core.tools.confirm_booking_tool import confirm_booking
 from engine.core.tools.escalation_tool import escalate_to_human
 
 
@@ -70,6 +71,14 @@ def build_tool_dispatch(db, client_config, phone_number: str) -> dict:
             notes=notes,
         )
 
+    async def _confirm_booking(booking_id: str) -> dict:
+        return await confirm_booking(
+            db=db,
+            client_config=client_config,
+            phone_number=phone_number,
+            booking_id=booking_id,
+        )
+
     async def _get_customer_bookings(filter: str = "all") -> dict:
         return await get_customer_bookings(db=db, phone_number=phone_number, filter=filter)
 
@@ -84,6 +93,7 @@ def build_tool_dispatch(db, client_config, phone_number: str) -> dict:
     return {
         "check_calendar_availability": _check_calendar_availability,
         "write_booking": _write_booking,
+        "confirm_booking": _confirm_booking,
         "get_customer_bookings": _get_customer_bookings,
         "escalate_to_human": _escalate_to_human,
     }
