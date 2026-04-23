@@ -369,6 +369,7 @@ async def run_agent(
     model = _get_model_name()
     active_provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     fallback_enabled = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() != "false"
+    _original_llm_provider = os.environ.get("LLM_PROVIDER", "anthropic")
 
     # Guardrail: tracks booking tool state for this invocation.
     # The confirmation guardrail only activates when check_calendar_availability
@@ -487,11 +488,8 @@ async def run_agent(
                         )
                     except Exception:
                         pass
+                    os.environ["LLM_PROVIDER"] = _original_llm_provider
                     return _FALLBACK_RESPONSE
-                finally:
-                    # Always restore provider so next message retries Anthropic first
-                    os.environ["LLM_PROVIDER"] = "anthropic"
-                    active_provider = "anthropic"
             else:
                 # Non-retryable error or fallback disabled — log and surface to caller
                 await log_incident(
@@ -578,6 +576,7 @@ async def run_agent(
 
                 # _GuardrailAction.PASS_THROUGH — fall through to return below
 
+            os.environ["LLM_PROVIDER"] = _original_llm_provider
             return final_text or _FALLBACK_RESPONSE
 
         # ── Tool use — execute tools and loop ─────────────────────────────────
@@ -646,12 +645,14 @@ async def run_agent(
         # Unknown stop reason — treat as end turn
         logger.warning(f"Unexpected stop_reason: {response.stop_reason!r} — treating as end_turn")
         final_text = _extract_text(response.content)
+        os.environ["LLM_PROVIDER"] = _original_llm_provider
         return final_text or _FALLBACK_RESPONSE
 
     # Max iterations reached — return fallback
     logger.error(
         f"Agent hit MAX_TOOL_ITERATIONS ({MAX_TOOL_ITERATIONS}) — returning fallback"
     )
+    os.environ["LLM_PROVIDER"] = _original_llm_provider
     return _FALLBACK_RESPONSE
 
 
