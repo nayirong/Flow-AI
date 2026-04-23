@@ -1,7 +1,7 @@
 # AGENTS.md — Flow AI Master Agent Index
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-22
+> Last Updated: 2026-04-23
 
 ---
 
@@ -147,6 +147,33 @@ These are the bill-to fields for HeyAircon invoices. Pass these at call time whe
 | Understanding which code file handles what | `docs/architecture/code_map.md` |
 | Monitoring API usage, incidents, guardrails, or writing SQL analytics queries | `docs/observability/sql-reference.md` |
 | Reviewing founder testing observations, picking up `#needs-review` entries, dispatching to agents | `docs/observability/observation-log.md` |
+
+---
+
+## Hard Rules — Git Worktree Discipline
+
+These rules exist because two separate worktrees (`feat/telegram-alerts`, `feat/llm-observability`) were lost on 2026-04-22 when `git worktree remove --force` removed branches whose commits existed only in the worktree working tree — never as committed git objects. Approximately 3 hours of implementation work was lost twice.
+
+### sdet-engineer — Merge Gate (Hard Rule)
+
+Before running `git merge feat/*` on main, always run:
+
+```
+git log main..feat/<branch-name> --oneline
+```
+
+Confirm there is at least one commit in the output (i.e., the feature branch has commits that main does not). If the output is empty, do NOT merge. Return to the software-engineer and require them to `git add` and `git commit` inside the worktree first. A passing test suite does NOT imply committed code. Tests run against working-tree files; `git merge` only operates on committed objects.
+
+### software-engineer — Commit Before Done (Hard Rule)
+
+After writing code and before reporting work complete:
+
+1. Run `git add -p` (or `git add <files>`) inside the worktree.
+2. Run `git commit -m "..."` with a descriptive message.
+3. Run `git log --oneline -5` to confirm the commit appears.
+4. Only then report "done" to the sdet-engineer.
+
+Do NOT exit the worktree or report "done" without a committed `git log` entry showing the work. Passing tests are not a substitute for a commit. If the worktree is removed before committing, all work is permanently lost.
 
 ---
 
