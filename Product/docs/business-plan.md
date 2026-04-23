@@ -71,22 +71,95 @@ The longer a business runs on Flow AI, the more the system learns their pricing 
 ### Prioritization Criteria
 Target clients with **high inquiry volume** AND **high revenue per customer or high transaction frequency** AND **clear willingness to pay for operational efficiency**.
 
-### Tier 1 — Primary Targets
+### Tier 1 — Primary Targets (Ranked by Priority)
 
-**Aesthetics, Beauty & Wellness Clinics**
-- High inbound inquiry volume across WhatsApp, Instagram DMs, and website simultaneously
-- LTV per customer is $500–$5,000+; treatment bookings, pricing questions, follow-up appointments are all conversation-heavy
-- Staff spend hours on repetitive inquiries ("how much is a facial?", "any slots this Friday?") instead of serving clients
-- Healthy margins; already spend on booking systems and POS software
-- Franchise and chain operators give multi-location expansion built-in
-- **Willingness to pay: High**
+#### 1. Aesthetics, Beauty & Wellness Clinics **[HIGHEST PRIORITY]**
 
-**Real Estate Agencies & Property Developers**
-- Extremely high inquiry-to-close conversion pressure; agents buried in leads that need qualification
-- High-ticket transactions mean capturing 1–2 more deals per month easily justifies software spend
-- AI qualification (budget, timeline, location preference, buyer vs renter) before assigning an agent has clear ROI
-- Accustomed to paying for lead gen and CRM tools
-- **Willingness to pay: Very High**
+**Profile:**
+- Annual revenue: $300K–$5M SGD
+- Team size: 3–20 staff (receptionist + therapists/aestheticians)
+- Inquiry volume: 100–500 inbound messages/week
+- WhatsApp adoption: Near-universal (primary booking channel)
+- Current pain: Receptionist buried in repetitive "How much?" and "Any slots Friday?" questions; Instagram DMs and WhatsApp both active
+- Willingness to pay: **High** (already spending $200–800/month on booking software + POS)
+- Ease of onboarding: **Very High** (clear service menu, fixed pricing tiers, predictable appointment slots)
+
+**Why this vertical first:**
+- Highest inquiry volume of any vertical = most visible ROI from automation
+- Conversation patterns are highly repetitive (10 FAQ questions cover 70% of inquiries)
+- Franchise operators common in SEA = land one location, expand to 5–10
+- Strong word-of-mouth within the aesthetics industry (association networks, supplier referrals)
+- Multi-channel chaos (WhatsApp + IG DMs + website + phone) = desperate for consolidation
+
+**Vertical-specific data capture:**
+- Treatment type, skin concerns, past treatments, preferred therapist, referral source
+
+**Key success metric:**
+Admin time saved per week (target: 15+ hours freed up from repetitive inquiry handling)
+
+---
+
+#### 2. Real Estate Agencies & Property Developers
+
+**Profile:**
+- Annual revenue: $500K–$10M SGD (agency or developer)
+- Team size: 5–50 agents
+- Inquiry volume: 200–1,000 leads/week
+- WhatsApp adoption: **Extremely high** (agents live on WhatsApp)
+- Current pain: Agents waste hours qualifying unserious leads; 80% of inquiries don't convert but still consume time
+- Willingness to pay: **Very High** (one extra deal/month = $5K–$20K commission, easily justifies any software cost)
+- Ease of onboarding: **Medium** (property inventory changes frequently, pricing is negotiable, requires CRM integration)
+
+**Why this vertical is #2:**
+- Highest transaction value = easiest ROI justification ($10K–$50K commission per deal)
+- Lead qualification is the #1 pain point AI solves perfectly (budget, timeline, location, buyer vs renter)
+- Fast decision-making culture (agents need tools that work immediately, not tools with 3-month onboarding)
+- Accustomed to paying for PropTech and CRM (PropertyGuru, 99.co integrations already normalized)
+
+**Vertical-specific data capture:**
+- Budget range, property type, location preference, buyer/renter/investor, timeline, financing status
+
+**Key success metric:**
+Lead-to-qualified-appointment conversion rate improvement
+
+---
+
+#### 3. Insurance Brokers & Independent Financial Advisors (IFAs)
+
+**Profile:**
+- Annual revenue: $200K–$3M SGD (individual broker or small team)
+- Team size: 1–10 advisors
+- Inquiry volume: 50–200 leads/month
+- WhatsApp adoption: **Very high** (primary client communication channel)
+- Current pain: Lead follow-up falls through cracks; policy renewal reminders done manually or not at all; no structured pipeline
+- Willingness to pay: **High** (commission-based income = conversion tools pay for themselves immediately)
+- Ease of onboarding: **High** (product catalog is standardized, compliance-friendly automation needed)
+
+**Why this vertical is #3:**
+- Long sales cycles = massive value in structured lead nurturing (6–12 month pipeline per lead)
+- Repeat business model (annual policy reviews, renewals) = high LTV justifies retention automation
+- Compliance constraints favor AI-assist (human still makes decisions, AI handles admin follow-up)
+- Tight-knit community = referrals spread fast once first broker adopts
+
+**Vertical-specific data capture:**
+- Coverage type, current policies, family size, risk profile, policy renewal dates, lead source
+
+**Key success metric:**
+Policy renewal rate improvement + lead pipeline visibility
+
+---
+
+### Deprioritized from Tier 1 (moved to Tier 2):
+
+**Education — Enrichment Centres, Tuition Franchises**
+- Strong fit but seasonal enrollment cycles create revenue inconsistency
+- Parents are price-sensitive; willingness to pay is **Medium** (lower margins than aesthetics/real estate)
+- Move to Tier 2 — target after proving model in top 3 verticals
+
+**Healthcare — Dental Chains, GP Clinics, Specialist Clinics**
+- Strong fit for multi-branch operators
+- Regulatory constraints require careful compliance design (human-in-loop is mandatory)
+- Move to Tier 2 — pilot with one friendly clinic chain after proving Tier 1 verticals
 
 **Insurance Brokers & Independent Financial Advisors**
 - Lead qualification and follow-up cadence is core to the business
@@ -130,16 +203,26 @@ Target clients with **high inquiry volume** AND **high revenue per customer or h
 
 ## 5. Competitor Analysis
 
+### SEA Market Context (April 2026)
+
+The SEA conversational AI market is fragmented across three tiers:
+
+1. **Enterprise platforms** (Yellow.ai, Sendbird) — complex, expensive, 3–6 month sales cycles, target large corporations
+2. **Horizontal SME tools** (respond.io, WATI, AiSensy) — accessible pricing, rule-based automation, serve every industry with shallow feature sets
+3. **Developer infrastructure** (Twilio, Vonage, Sendbird SDK) — chat APIs and SDKs that agencies use to build custom solutions
+
+**Flow AI occupies the white space:** vertical-specific AI agents for SEA service SMEs, with fast time-to-value (4 weeks) and accessible pricing ($1,600–$5K custom builds, $149–$1,499/month SaaS at scale). Not infrastructure (too low-level), not generic horizontal tool (too shallow), not enterprise (too slow and expensive).
+
 ### Tier 1 — Most Directly Relevant
 
 | Competitor | What They Do | Gap Flow AI Exploits |
 |---|---|---|
-| **Sierra (sierra.ai)** | Enterprise AI agent builder — clients describe their business, Sierra builds a fully custom conversational AI agent. Clients include Weight Watchers, Sonos, SiriusXM. High-touch, white-glove delivery. | US-enterprise-only, extremely high cost, no SEA presence, no vertical pre-configuration for service industries. Flow AI can own the SEA mid-market that Sierra would never serve. |
-| **Sendbird** | Developer-first chat infrastructure (API/SDK) with AI layer. Businesses embed Sendbird to build their own messaging features. Used by DoorDash, Yahoo, Carousell. | Sells to developers building products, not business owners wanting a ready solution. Their AI is an add-on, not a core vertical agent. Flow AI sits above Sendbird as the application layer. |
-| **respond.io** | Omnichannel inbox + automation (WhatsApp, IG, FB, Telegram) with growing AI features. Strong SEA traction. Well-funded. | Horizontal — serves every industry with no vertical intelligence. No structured data capture. AI is bolt-on, not core. Flow AI wins on vertical depth. |
-| **WATI** | WhatsApp Business API tool with broadcast, inbox, and basic automation. Popular with SEA SMEs. | Rule-based automation, not AI reasoning. No data intelligence layer. Cannot handle freeform conversation. Flow AI handles what WATI cannot. |
-| **Yellow.ai** | Enterprise conversational AI platform. Strong India/SEA presence. Sales-led, complex implementation. | Complex, expensive, long sales cycles. No self-serve. Requires significant technical integration. Flow AI wins on speed-to-value and vertical focus. |
-| **Intercom (Fin AI)** | Enterprise AI customer service for SaaS and digital products. Powerful AI with rich integrations. | Built for SaaS/digital companies — wrong DNA for service SMEs. Pricing and complexity exclude the target market. |
+| **respond.io** | Omnichannel inbox + automation (WhatsApp, IG, FB, Telegram) with growing AI features. Strong SEA traction (Malaysia HQ). Well-funded ($7M Series A). Popular with e-commerce and service SMEs. | Horizontal — serves every industry with zero vertical intelligence. AI is a bolt-on feature (launched 2023), not the core product. No vertical data model (no service taxonomy, no booking logic). Flow AI wins on vertical depth and structured data capture. respond.io is a good lead funnel — clients who outgrow respond.io's rule-based automation are ideal Flow AI prospects. |
+| **WATI** | WhatsApp Business API tool with broadcast, inbox, and basic rule-based automation. Very popular with SEA SMEs (Singapore HQ). Strong brand presence. | Rule-based decision trees only — no LLM reasoning. Cannot handle freeform conversation ("What's your cheapest option?" breaks the script). No calendar integration, no structured CRM data model. WATI users are Flow AI's core ICP — they already understand WhatsApp Business value; they just need AI reasoning on top. |
+| **Yellow.ai** | Enterprise conversational AI platform. Strong India/SEA presence. Clients include Domino's, Hyundai, Mashreq Bank. Sales-led, complex implementation (3–6 months). | Enterprise-only — minimum $50K+/year contracts. Long implementation cycles. Requires dedicated IT resources. Pricing and complexity exclude SME market entirely. Flow AI owns the SME tier Yellow.ai ignores. |
+| **Sierra (sierra.ai, US-based)** | Enterprise AI agent builder — clients describe their business, Sierra builds a fully custom conversational AI agent. Founded by OpenAI/Salesforce veterans. Clients include Weight Watchers, Sonos, SiriusXM. High-touch, white-glove delivery. | US-enterprise-only. Extremely high cost (estimated $100K–$500K+/year). No SEA presence, no SEA market knowledge. No vertical pre-configuration for service industries. Flow AI can own the SEA mid-market that Sierra would never serve (TAM too small for their model). |
+| **Sendbird** | Developer-first chat infrastructure (API/SDK) with AI layer. Businesses embed Sendbird to build their own messaging features. Used by DoorDash, Yahoo, Carousell, Reddit. Strong developer brand. | Sells to developers building products (B2D), not business owners wanting a ready solution (B2B). Their AI is an add-on feature, not a core vertical agent. Flow AI sits above Sendbird as the application layer — we could use Sendbird's infrastructure under the hood if we expand beyond WhatsApp. |
+| **Intercom (Fin AI)** | Enterprise AI customer service for SaaS and digital products. Powerful AI (GPT-4 based) with rich integrations (Stripe, Salesforce, etc.). Strong in US/Europe. | Built for SaaS/digital companies — wrong DNA for service SMEs. Pricing ($74/seat/month + $0.99/resolution) excludes 2–5 person service businesses. Website-chat-first (WhatsApp is secondary). Flow AI is WhatsApp-native for SEA service SMEs, not a SaaS helpdesk tool. |
 
 ### Tier 2 — Partial Competitors
 
@@ -198,6 +281,74 @@ Service businesses refer within tight industry guilds and associations. One high
 
 ## 7. Product & Service Strategy
 
+### The Repeatable Platform Pattern (Validated via HeyAircon Pilot)
+
+The HeyAircon pilot (live April 2026) validated a **core-plus-config architecture** that is 80% reusable across all future service-industry clients. This pattern is the foundation of the SaaS product roadmap.
+
+#### What's 100% Reusable (Core Platform)
+
+| Component | Description | Technology |
+|---|---|---|
+| **Python orchestration engine** | FastAPI async service — handles all webhook routing, agent dispatch, tool execution | FastAPI + Pydantic |
+| **WhatsApp Cloud API integration** | Send/receive messages, webhook verification, media handling | Meta Cloud API (direct, no BSP dependency) |
+| **LLM agent loop** | Tool use, context injection, conversation memory, fallback handling | Anthropic SDK (Claude Haiku 4.5 primary, GPT-4o-mini fallback) |
+| **Supabase data model** | Core tables: `customers`, `bookings`, `interactions_log`, `config`, `policies` | Supabase (Postgres) |
+| **Google Calendar integration** | Availability check + event creation (add-only, never remove/update) | Google Calendar API |
+| **Context engineering pattern** | Business data (services, pricing, policies) lives in DB, injected at runtime — never hardcoded in prompts | Context builder module |
+| **Escalation gate mechanism** | Binary flag check before agent runs; holding reply on escalation | Pre-agent gate check |
+| **Human handoff flow** | WhatsApp notification to human agent + conversation context pass-through | Meta API + notification module |
+
+**Deployment model:** One Railway project per client, all connected to the same GitHub monorepo. Each project tracks the `release` branch. Adding a new client = create Railway project + 5 env vars + 1 Supabase row. No code changes.
+
+#### What Changes Per Client (Configuration Layer)
+
+| Item | Storage | Example from HeyAircon |
+|---|---|---|
+| Service catalogue | `config` table | Chemical Wash, General Servicing, Gas Top-Up, Installation, Repair, Contract |
+| Pricing structure | `config` table | 1 unit $50, 2 units $60, 3 units $75... (varies by BTU size) |
+| Policies | `policies` table | Rescheduling policy: 48h notice required |
+| Business hours | `config` table or env var | 9am–6pm, Mon–Sat |
+| Time windows | `config` table | AM (9am–1pm), PM (1pm–6pm) |
+| Brand voice/persona | System prompt template | Friendly, professional, Singapore English |
+| WhatsApp number | Env var | `WHATSAPP_NUMBER`, `META_PHONE_NUMBER_ID` |
+| Calendar ID | Env var | Google Calendar ID per client |
+| LLM API keys | Env var (per-client) | Each client billed on their own Anthropic/OpenAI account |
+
+**Client onboarding time:** 4 weeks (1 week setup + 2 weeks build + 1 week UAT). Most time spent on content gathering (service descriptions, pricing, policies), not engineering.
+
+#### What Changes Per Vertical (Semi-Portable Patterns)
+
+| Pattern | Varies By Vertical | Examples |
+|---|---|---|
+| **Service taxonomy** | Field names and structure | Aircon: `unit_count`, `aircon_brand`, `btu_size` <br> Aesthetics: `treatment_type`, `skin_concern`, `therapist_preference` <br> Real Estate: `property_type`, `budget_range`, `location`, `buyer_vs_renter` |
+| **Booking complexity** | Appointment logic | Aircon: 2 fixed daily windows (AM/PM) <br> Aesthetics: 30-min or 60-min slots, 9am–9pm <br> Real Estate: Viewing slots (flexible, multi-property per session) |
+| **Data fields** | CRM schema extensions | Aircon: `unit_count`, `postal_code`, `last_service_date` <br> Insurance: `policy_type`, `coverage_amount`, `renewal_date` |
+| **Follow-up cadence** | Reminder/nurture timing | Aircon: Annual maintenance reminder <br> Aesthetics: Monthly facial reminder <br> Insurance: Quarterly policy review nudge |
+
+**Vertical-specific modules** are built as extensions to the core — they don't replace it. A new vertical requires: (1) new data field definitions in Supabase schema, (2) updated intake flow prompts, (3) vertical-specific FAQ templates. Core agent loop and orchestration are untouched.
+
+#### What We Learned from HeyAircon (Key Insights for Next Clients)
+
+| Learning | Implication for Platform |
+|---|---|
+| **Google Sheets → Supabase migration is mandatory before client 2** | Sheets hit 10M cell limit within months at moderate volume. All future clients start on Supabase from day one. Client access via Supabase Studio (table editor). |
+| **Escalation gate needs nuance (not binary silence)** | Current design: escalated customers get zero agent response. Improvement planned: send holding reply on first inbound, allow agent to answer unrelated FAQ questions while escalation is active. |
+| **Clients want to self-manage content (pricing, services, policies)** | Config-driven architecture validated. Non-technical clients can edit Supabase Studio tables directly. Changes take effect on next customer message (no redeploy). |
+| **Calendar integration is the #1 value driver** | Customers love instant "slot is free, booked" confirmation. Calendar availability check is non-negotiable for any booking-heavy vertical. |
+| **Conversation memory is critical** | Customers expect the agent to remember context from 3 messages ago. LangGraph persistent memory (PostgreSQL checkpointer) handles this. Redis session state is not enough. |
+| **Human handoff must be fast and context-rich** | Sending a "customer needs help" alert without conversation context creates rework. Escalation notification must include: customer name, phone, issue summary, conversation link. |
+| **Pricing transparency reduces escalations** | When the agent quotes exact pricing confidently (pulled from `config` table), customers book immediately. Vague answers ("depends on your unit") trigger escalations. |
+
+#### Platform Roadmap Informed by Repeatability Analysis
+
+**Phase 1 (current):** Custom builds with 80% reusable core. Each client is a new Railway project. Shared GitHub repo. Supabase per-client or shared DB (TBD at scale).
+
+**Phase 2 (6–12 months):** Self-serve SaaS with vertical presets. Onboarding = select vertical → input business details → connect WhatsApp → go live in 48 hours. One shared Railway deployment serving all SaaS clients (multi-tenant Supabase). Custom build clients remain on dedicated Railway projects.
+
+**Phase 3 (12–24 months):** Data intelligence layer. Aggregate anonymized conversation data across clients in same vertical to build: benchmarking reports (avg conversion rate, pricing trends), FAQ auto-suggestions, vertical-specific prompt tuning.
+
+---
+
 ### The Recommended Path: Vertical SaaS with Professional Services Wrapper
 
 Do not build a generic platform. Do not run a pure custom dev agency. Build a **purpose-built SaaS product** with a **professional services tier** for clients who need bespoke work — using custom builds in Phase 1 to fund and inform the SaaS product in Phase 2.
@@ -209,7 +360,7 @@ Take on anchor clients as custom AI agent projects. Use this phase to:
 - Build case studies and reference customers
 - Understand the real operational pain points before building a self-serve product
 
-**Deliverable to client:** A fully configured AI agent (WhatsApp + website chat) built on proven infrastructure (n8n, WhatsApp API, LLM layer). Client gets a working system. Flow AI gets paid and retains learnings.
+**Deliverable to client:** A fully configured AI agent (WhatsApp + website chat) built on proven infrastructure (Python FastAPI engine, WhatsApp API, LLM layer, Supabase). Client gets a working system. Flow AI gets paid and retains learnings.
 
 **Key discipline:** Document every build. Every custom configuration that gets reused is a future SaaS feature. Every FAQ template, intake form, or escalation rule that works across clients becomes a vertical preset.
 

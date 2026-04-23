@@ -10,6 +10,7 @@ This directory contains architecture documents for the Flow AI platform and clie
 - `google_sheets_sync.md` — Google Sheets data sync architecture: post-write sync for customers + bookings, fire-and-forget error handling, linear scan deduplication, gspread integration, Phase 2 decommission path
 - `address_schema_migration.md` — ADR: move `address` + `postal_code` from `customers` to `bookings`; three-phase migration plan with DDL, write_booking() change spec, rollback notes, and edge cases
 - `escalation_reset.md` — ADR + implementation spec for escalation reset via WhatsApp reply-to-message: `escalation_tracking` table, `send_message()` return type change, `reset_handler` module, human agent routing, keyword validation, audit trail
+- `telegram_alerts.md` — Internal Telegram alert bot: Tier 1 + Tier 2 alerting wiring, `send_telegram_alert()` public function, `api_incidents` schema extension (`source`, `context` columns), migration `005_observability_tables.sql`, message format templates, PII rules, no-op safety spec, dependency order
 
 ### Source documents (read before producing architecture)
 - `clients/hey-aircon/plans/build/00_architecture_reference.md` — current n8n architecture (living reference)

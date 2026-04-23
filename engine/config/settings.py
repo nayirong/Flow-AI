@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     shared_supabase_url: str
     shared_supabase_service_key: str
 
+    # Internal Telegram alerting (optional — alerts silently disabled if unset)
+    telegram_bot_token: str | None = None
+    telegram_alert_chat_id: str | None = None
+
     # Logging
     log_level: str = "INFO"
     

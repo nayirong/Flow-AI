@@ -24,7 +24,8 @@
       "Bash(python3 -m pytest engine/tests/unit/test_address_schema_migration.py -v)",
       "Bash(black --check engine/core/tools/booking_tools.py engine/tests/unit/test_address_schema_migration.py)",
       "Bash(black engine/core/tools/booking_tools.py engine/tests/unit/test_address_schema_migration.py)",
-      "Bash(python3 -m pytest engine/tests/unit/test_address_schema_migration.py engine/tests/unit/ -v)"
+      "Bash(python3 -m pytest engine/tests/unit/test_address_schema_migration.py engine/tests/unit/ -v)",
+      "Bash(python3 -m pytest tests/unit/ -v)"
     ],
     "additionalDirectories": [
       "/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/.claude/skills",

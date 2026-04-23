@@ -1,7 +1,7 @@
 # AGENTS.md — Flow AI Master Agent Index
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-21
+> Last Updated: 2026-04-22
 
 ---
 
@@ -58,6 +58,9 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 | `clients/hey-aircon/plans/build/00_architecture_reference.md` | Living architecture doc — infrastructure, workflows, known issues, go-live checklist |
 | `clients/hey-aircon/plans/build/02_component_b_c_setup.md` | Build guide for Components B + C |
 | `clients/hey-aircon/website/` | Static HTML website (built) |
+| `engine/core/reset_handler.py` | Escalation reset handler — reply-to-message detection, keyword matching, clears `escalation_flag` + `escalation_notified` |
+| `supabase/migrations/003_escalation_tracking.sql` | Escalation tracking table + 3 indexes |
+| `supabase/migrations/004_escalation_notified.sql` | `escalation_notified` column on customers table |
 
 ---
 
@@ -89,6 +92,9 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 | Monorepo | Decided 2026-04-15 — single repo; split before client 3 |
 | Railway deployment model | Decided 2026-04-18 — Option A: one Railway project per client, all connected to same repo. Each project tracks `release` branch (not `main`) so deploys are explicit and per-client. Adding a client = new Railway project + 3 env vars + 1 Supabase row. |
 | Google Sheets sync — Core, not bespoke | Decided 2026-04-20 — Post-write sync to external visibility layer is a portable platform pattern. Lives in `integrations/google_sheets.py`. Config flags (`sheets_sync_enabled`, `sheets_spreadsheet_id`) in `clients` table. Sheets failure is fire-and-forget — never rolls back Supabase write. Phase 2 will replace Sheets with dashboard; sync layer must not block that migration. Tables synced: `customers` + `bookings` only (`interactions_log` excluded). |
+| Escalation reset mechanism | Decided 2026-04-22 — Reply-to-message + keyword matching ("done"/"resolved"/"ok" etc.) implemented in `reset_handler.py`. WhatsApp label-based reset rejected — Meta does not send webhook events for label removal. Human agent replies to escalation alert → agent detects `context_message_id` → matches keywords → clears `escalation_flag` + marks `resolved_at` in `escalation_tracking`. |
+| Escalation holding reply — once only | Decided 2026-04-22 — `escalation_notified` column controls holding reply state. First inbound from escalated customer → send holding reply once + flip `escalation_notified=True`. Subsequent inbound → silently dropped (no reply, no agent call). On reset → `escalation_notified` reset to `False` for re-escalation. Prevents message spam to escalated customers. |
+| Sheets sync on escalation reset | Decided 2026-04-22 — `reset_handler.py` calls `sync_customer_to_sheets()` immediately after clearing `escalation_flag` so CRM reflects updated state without waiting for customer's next message. Previously Sheets only updated when customer sent next message — now immediate. |
 
 ---
 

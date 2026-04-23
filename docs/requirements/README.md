@@ -12,6 +12,7 @@ This directory contains formal requirements documents produced by the product-ma
 | Google Sheets Data Sync | [google_sheets_sync.md](google_sheets_sync.md) | Draft — Pending Founder Approval | 2026-04-20 |
 | Proactive Follow-up Flow | [proactive_followup.md](proactive_followup.md) | Draft — Pending Founder Approval | 2026-04-22 |
 | Escalation Reset via WhatsApp Reply | [escalation_reset.md](escalation_reset.md) | Draft — Pending Founder Approval | 2026-04-22 |
+| Internal Telegram Alert Bot | [telegram_alerts.md](telegram_alerts.md) | Draft — Pending Founder Approval | 2026-04-22 |
 | HeyAircon Phase 1 | `hey-aircon-requirements.md` | To-do | — |
 | Package Awareness (WhatsApp Agent) | [REQ-package-awareness.md](REQ-package-awareness.md) | Parked — decision-complete, awaiting Phase 1 delivery | 2026-04-20 |
 

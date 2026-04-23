@@ -39,7 +39,7 @@
 | B: Escalation gate | Complete | Binary gate with holding reply on TRUE branch |
 | C: AI Agent (Claude Haiku 4.5 + context builder) | Complete | Context engineering working; Config + Policies via Supabase |
 | D: Booking tools (calendar + write_booking) | Live | `check_calendar`, `create_event`, and `write_booking` all operational. Google Calendar integration confirmed working. |
-| E: Escalate-to-human tool | Built, Pending Test Verification | `engine/core/tools/escalation_tool.py` implemented. Sets `escalation_flag=True` in Supabase + sends WhatsApp alert to human agent. No unit or integration tests exist. No production verification. `@sdet-engineer` dispatched 2026-04-22. |
+| E: Escalate-to-human tool | Complete — Production Verified 2026-04-22 | Full escalation + reset flow implemented and verified. Escalation: `escalation_tool.py` sets flag + sends WhatsApp alert to human agent. Reset: `reset_handler.py` detects reply-to-message + keywords, clears flag. Holding reply sent once only (`escalation_notified` column). Sheets sync immediate on reset. 143 unit tests passing. Migrations 003 + 004 live in production. |
 | Supabase (shared platform) | Complete | Tables provisioned; HeyAircon row live |
 | Meta dev account | Complete | Webhook verified, real traffic flowing as of 2026-04-19 |
 | Google Calendar integration | Working | Resolved in prior session. |
@@ -88,6 +88,40 @@
 
 ---
 
+## Feature Tracking
+
+### Internal Telegram Alert Bot — All Clients
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Direction Frame | Pending Founder Approval | Drafted 2026-04-22 — awaiting confirmation before PM dispatch |
+| Requirements (`@product-manager`) | Not Started | Awaiting direction frame approval |
+| Architecture (`@software-architect`) | Not Started | |
+| Test Plan + Implementation (`@sdet-engineer`) | Not Started | |
+
+---
+
+## Go-to-Market Workstream — Multi-Client Expansion
+
+**Opened:** 2026-04-23  
+**Owner:** chief-of-staff  
+**Objective:** Define target market, client archetypes, and core pitch angle for scaling beyond HeyAircon pilot.
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Market Analysis & Target Verticals | Complete | `@business-strategist` — top 3 archetypes identified: (1) Aesthetics & Wellness Clinics, (2) Real Estate Agencies, (3) Insurance Brokers/IFAs |
+| Pitch Brief | Complete | `@business-strategist` — pitch framework (problem/solution/proof/why now/ask), competitive positioning, objection handling, 5-touch outreach sequence. File: `docs/gtm/pitch-brief.md` |
+| Messaging Playbook | Complete | `@growth-marketer` — 13,000+ word playbook: value prop (3 versions), vertical hooks, cold outreach templates (5-touch sequence, LinkedIn + email), discovery call script, LinkedIn content templates, website copy framework. File: `docs/messaging-playbook.md` |
+| Competitor Analysis | Complete | `@business-strategist` — 27,000+ word standalone analysis: landscape map (4 tiers), 6 battle cards (respond.io, WATI, Yellow.ai, ManyChat, Intercom, Sierra), white space analysis, moat analysis, SEA market sizing (TAM/SAM/SOM), risk watch list. File: `docs/gtm/competitor-analysis.md` |
+
+**Deliverables (all complete):**
+- `Product/docs/business-plan.md` (updated) — market analysis, target segments, competitive positioning, HeyAircon repeatable pattern
+- `docs/gtm/pitch-brief.md` — core pitch framework and 3 client archetypes (new file)
+- `docs/gtm/competitor-analysis.md` — 27,000+ word standalone competitive analysis: landscape map, 6 battle cards, white space analysis, moat analysis, SEA market sizing, risk watch list (new file)
+- `docs/messaging-playbook.md` — outbound messaging, value prop, objection handling, discovery call script, LinkedIn posts, website copy (new file)
+
+---
+
 ## Backlog — Pending PM Requirements
 
 | Feature | Status | Notes |
@@ -100,6 +134,10 @@
 
 | Date | Event |
 |------|-------|
+| 2026-04-22 | **Escalation + reset flow — production verified ✅.** All 3 test scenarios passed: P1 (customer message while escalated → holding reply once), P2 (customer second message while escalated → silent drop), P3 (human agent reply "done" → flag cleared, AI resumes). Sheets sync on reset confirmed immediate. Implementation: `engine/core/tools/escalation_tool.py` (sets `escalation_flag=True`, sends WhatsApp alert with wamid, inserts `escalation_tracking` row), `engine/core/reset_handler.py` (NEW — reply-to-message detection + keyword matching, clears flag + marks `resolved_at`), `engine/core/message_handler.py` (holding reply once via `escalation_notified` gate, subsequent inbound silently dropped), `engine/integrations/meta_whatsapp.py` (`send_message()` now returns wamid), `engine/api/webhook.py` (extracts `context_message_id`). Migrations 003 + 004 live. 143 unit tests passing. Commits: `3004564` (escalation reset), `75053e6` (holding reply once), `4810631` (Sheets sync on reset). Component E: **Complete**. |
+| 2026-04-22 | Supabase migrations 003 and 004 confirmed run against HeyAircon production DB. `003_escalation_tracking.sql` (escalation_tracking table + 3 indexes) and `004_escalation_notified.sql` (`escalation_notified BOOLEAN` column on `customers`) are now live. Engine code (commit `75053e6`) and schema are now in sync. Production verification of escalation + reset flow (P1–P3 test scenarios) is the next pending action. |
+| 2026-04-22 | Escalation "holding reply only once" behavior shipped (commit `75053e6`). First inbound from escalated customer → holding reply sent once + `escalation_notified` flipped to `True`. Subsequent inbound → silently dropped, no reply, no agent. On reset → `escalation_notified` reset to `False` for re-escalation. 143 unit tests passing. |
+| 2026-04-22 | Internal Telegram Alert Bot feature bootstrapped. Direction frame drafted, failure point audit completed, api_failure table mapping resolved (table is `api_incidents` + `noncritical_failures` in `engine/integrations/observability.py`). Telegram stub already present in `observability.py` — wiring is the primary build task. `@product-manager` dispatch pending direction frame approval. |
 | 2026-04-22 | Status corrections: Component E corrected from "Not Started" to "Built, Pending Test Verification" — `escalation_tool.py` was fully implemented but not reflected in status_log. Both bugs from 2026-04-21 session confirmed resolved via code review + git history. BUG (critical) guardrail re-prompt leak: RESOLVED in commit `c70198f` — re-prompt now injected as loop `user` message with `continue`, never returned to customer. BUG (medium) `booking_count` not incremented: RESOLVED in commits `c70198f` + `a464093` — uses `total_bookings` (DB trigger column) with customer re-fetch after booking write. Process gap noted: neither bug was logged in `observation-log.md`, so no formal `#resolved` trail exists. `@sdet-engineer` dispatched to create escalation tool test plan and verify end-to-end workflow. |
 | 2026-04-21 | Production test session completed (HeyAircon pilot). 2 passes, 2 bugs filed. PASS: T+2 advance booking policy enforced correctly (agent rejected "tomorrow evening," offered 24 April). PASS: Customer record created on first inbound message (log confirmed `New customer created: 6582829071`). BUG (medium): `booking_count` not incremented on first booking — remained 0 after booking HA-20260424-87RU, incremented to 1 only after second booking HA-20260426-RF02. Suspected race condition between `write_booking` increment PATCH and `message_handler` `last_seen_at` PATCH overwriting the counter. Files: `engine/core/tools/write_booking.py`, `engine/core/message_handler.py`. BUG (critical): Guardrail re-prompt message (agent internal reasoning) delivered to customer as outbound WhatsApp message — interaction log ID 269. Re-prompt in `agent_runner.py` must be injected as internal turn only, never as an outbound reply. Both bugs filed in `.flow/tasks/active.md`. |
 | 2026-04-21 | Chemical wash BTU pricing — clarification strategy decision. Evaluated three options (ask-first, range-first, list-all). Decision: Option B (range-first). Agent leads with price range on first reply ("from $80 to $130 for 1 unit depending on BTU size") then asks for BTU. Config-only change: update `variation_hint_chemical_wash` and `variation_hint_chemical_overhaul` rows in Supabase `config` to instruct range-first behaviour. No code change to `context_builder.py`. No Railway redeploy. Two UPDATE statements in Supabase Studio; takes effect on next inbound message. |
