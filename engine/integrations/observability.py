@@ -59,25 +59,28 @@ Required env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_CHAT_ID.
 """
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+_TIER2_ACTION_NOTES = {
+    "escalation_human_alert": "Human agent WhatsApp alert failed. Escalation flag is still set in DB.\nManual follow-up required.",
+    "escalation_sheets_sync": "Google Sheets customer sync failed after escalation. DB record is intact.",
+    "sheets_sync_customer": "Google Sheets customer sync failed. DB record is intact.",
+    "sheets_sync_booking": "Google Sheets booking sync failed. DB record is intact.",
+    "llm_anthropic_fallback": "Anthropic unavailable — OpenAI fallback served the customer successfully. Monitor Anthropic status.",
+}
 
-# ── Telegram extension point (no-op until wired) ──────────────────────────────
+
+# ── Telegram transport ────────────────────────────────────────────────────────
 
 async def _send_telegram_alert(message: str) -> None:
-    """
-    Send an alert message to the configured Telegram group chat.
-
-    No-op stub — activate by setting TELEGRAM_BOT_TOKEN and TELEGRAM_ALERT_CHAT_ID
-    env vars. When both are present, sends via the Telegram Bot API.
-    Never raises.
-    """
+    """Send to Telegram group. No-op when env vars absent. Never raises."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
     if not bot_token or not chat_id:
-        return  # Not yet configured — silent no-op
+        return
     try:
         import httpx
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -90,6 +93,46 @@ async def _send_telegram_alert(message: str) -> None:
             })
     except Exception as e:
         logger.warning("Telegram alert failed (non-critical): %s", e)
+
+
+async def send_telegram_alert(
+    title: str,
+    source: str,
+    client_id: str,
+    error_type: str,
+    error_message: str,
+    context: Optional[dict] = None,
+    action_note: Optional[str] = None,
+) -> None:
+    """Send a Tier 1 CRITICAL Telegram alert. Never raises."""
+    try:
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        context_lines = ""
+        if context:
+            parts = []
+            if "customer_phone" in context:
+                parts.append(f"Customer: {context['customer_phone']}")
+            if "booking_id" in context:
+                parts.append(f"Booking: {context['booking_id']}")
+            if "calendar_event_id" in context:
+                parts.append(f"Calendar Event: {context['calendar_event_id']} (ALREADY CREATED)")
+            if "providers_failed" in context:
+                parts.append(f"Providers failed: {context['providers_failed']}")
+            if parts:
+                context_lines = "\n" + "\n".join(parts)
+        note = action_note or "Review logs for details."
+        message = (
+            f"CRITICAL | {title}\n"
+            f"Client: {client_id or 'unknown'}\n"
+            f"Source: `{source}`\n"
+            f"Time: {timestamp}\n"
+            f"\nError: {error_type} — {str(error_message)[:200]}"
+            f"{context_lines}\n"
+            f"\n{note}"
+        )
+        await _send_telegram_alert(message)
+    except Exception:
+        pass
 
 
 async def log_incident(
