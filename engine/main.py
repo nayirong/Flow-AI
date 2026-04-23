@@ -16,14 +16,6 @@ import logging
 import os
 import sys
 
-# ── Repo root path fix ───────────────────────────────────────────────────────
-# When Railway root directory is set to /engine, commands run from inside
-# engine/ so the repo root is not on sys.path. Add it so all
-# `from engine.xxx import` statements continue to work unchanged.
-_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
-
 # ── Logging configuration ─────────────────────────────────────────────────────
 # Read LOG_LEVEL directly from env (not via settings proxy) so logging is
 # configured before any settings import that could fail noisily at startup.
