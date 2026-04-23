@@ -510,6 +510,46 @@ async def test_guardrail_reprompt_recovers_booking(mock_call_llm, mock_get_clien
 @pytest.mark.asyncio
 @patch("engine.core.agent_runner._get_llm_client")
 @patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
+async def test_guardrail_fires_when_summary_sent_without_write_booking(mock_call_llm, mock_get_client):
+    """
+    Agent calls check_calendar_availability, then sends a booking summary asking
+    the customer to reply yes, but never calls write_booking. Guardrail must catch
+    this as a premature booking summary and return the safe fallback.
+    """
+    from engine.core.agent_runner import run_agent, _BOOKING_GUARDRAIL_FALLBACK
+
+    calendar_resp = _tool_use_response(
+        tool_name="check_calendar_availability",
+        tool_id="tool_cal_006",
+        tool_input={"date": "2026-04-30", "timezone": "Asia/Singapore"},
+    )
+    premature_summary = _end_turn_response(
+        "Here's your booking summary:\n"
+        "Service: General Servicing\n"
+        "Date: 2026-04-30\n"
+        "Please reply yes to confirm your appointment."
+    )
+
+    mock_call_llm.side_effect = [calendar_resp, premature_summary, premature_summary]
+
+    async def mock_check_calendar(**kwargs):
+        return {"am_available": True, "pm_available": False}
+
+    result = await run_agent(
+        system_message="Sys.",
+        conversation_history=[],
+        current_message="Book me for 30 April AM.",
+        tool_definitions=[{"name": "check_calendar_availability"}],
+        tool_dispatch={"check_calendar_availability": mock_check_calendar},
+    )
+
+    assert result == _BOOKING_GUARDRAIL_FALLBACK
+    assert mock_call_llm.call_count == 3
+
+
+@pytest.mark.asyncio
+@patch("engine.core.agent_runner._get_llm_client")
+@patch("engine.core.agent_runner._call_llm", new_callable=AsyncMock)
 async def test_guardrail_reprompt_text_response_blocked(mock_call_llm, mock_get_client):
     """
     Agent calls check_calendar_availability, then returns premature confirmation
