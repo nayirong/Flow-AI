@@ -1,8 +1,27 @@
 # Architecture Spec: Internal Telegram Alert Bot
 
-**Status:** Ready for implementation
+**Status:** Live in production
 **Created:** 2026-04-22
+**Last updated:** 2026-04-23
 **Requirement source:** `docs/requirements/telegram_alerts.md`
+
+---
+
+## Design Decisions
+
+### Alert throttling cooldowns (decided 2026-04-23)
+
+Implemented in `engine/integrations/observability.py` via `ALERT_COOLDOWN_SECONDS` (default) and `_ALERT_COOLDOWN_OVERRIDES` (per-source).
+
+| Source | Cooldown | Rationale |
+|--------|----------|-----------|
+| Default (all sources) | 60s | Suppress bursts within a single incident without delaying alerts for distinct events. Most failure types (Sheets sync, escalation alert) are transient single-event failures. |
+| `llm_anthropic_fallback` | 900s (15 min) | Anthropic outages last minutes to hours. Every inbound message fires this source — a 1-hour outage generates 60 pings at 60s vs 4 pings at 15min. 15min is enough to stay informed without flooding. |
+| `llm_both_failed` | 900s (15 min) | Same reasoning — both providers down is a sustained incident, not a one-off event. |
+
+**Important:** Supabase writes (`noncritical_failures`, `api_incidents`) are never throttled. Every failure is recorded regardless of cooldown state. Only the Telegram ping is suppressed.
+
+To adjust cooldowns: edit `ALERT_COOLDOWN_SECONDS` (default) or `_ALERT_COOLDOWN_OVERRIDES` (per-source) in `engine/integrations/observability.py`.
 
 ---
 

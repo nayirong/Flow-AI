@@ -68,7 +68,20 @@ logging.getLogger("httpx").setLevel(logging.WARNING)  # prevent token exposure i
 # In-memory cooldown to prevent alert flooding.
 # Keyed by alert source; value is the timestamp of the last Telegram send.
 _alert_cooldown: dict[str, datetime] = {}
-ALERT_COOLDOWN_SECONDS = 900  # 15 minutes per source
+
+# Default: 60s — enough to suppress a burst within a single incident without
+# delaying actionable alerts for genuinely distinct events.
+#
+# llm_anthropic_fallback is 900s (15 min) because Anthropic outages last minutes
+# to hours and every inbound message generates one — 1hr outage = 60 pings at 1min,
+# 4 pings at 15min. Other sources (Sheets sync, escalation alert) are transient
+# single-event failures unlikely to repeat in bursts, so 1min is fine.
+ALERT_COOLDOWN_SECONDS = 60
+
+_ALERT_COOLDOWN_OVERRIDES: dict[str, int] = {
+    "llm_anthropic_fallback": 900,   # 15 min — outage can last hours, fires on every message
+    "llm_both_failed":        900,   # same reasoning: both providers down = sustained incident
+}
 
 _TIER2_ACTION_NOTES = {
     "escalation_human_alert": "Human agent WhatsApp alert failed. Escalation flag is still set in DB.\nManual follow-up required.",
@@ -90,11 +103,12 @@ async def _send_telegram_alert(message: str, source: str = "") -> None:
     """
     if source:
         now = datetime.now(timezone.utc)
+        cooldown = _ALERT_COOLDOWN_OVERRIDES.get(source, ALERT_COOLDOWN_SECONDS)
         last_sent = _alert_cooldown.get(source)
-        if last_sent and (now - last_sent) < timedelta(seconds=ALERT_COOLDOWN_SECONDS):
+        if last_sent and (now - last_sent) < timedelta(seconds=cooldown):
             logger.debug(
-                "Telegram alert suppressed (cooldown active): source=%s last_sent=%s",
-                source, last_sent.isoformat(),
+                "Telegram alert suppressed (cooldown active): source=%s cooldown=%ds last_sent=%s",
+                source, cooldown, last_sent.isoformat(),
             )
             return
         _alert_cooldown[source] = now
