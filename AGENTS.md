@@ -177,6 +177,65 @@ Do NOT exit the worktree or report "done" without a committed `git log` entry sh
 
 ---
 
+## Deployment & Integration Hard Rules
+
+These rules were added after the 2026-04-24 session post-mortem, which identified 4 rework clusters totaling 20 commits. Each rule addresses a specific avoidable failure mode.
+
+### Platform Feature Check Gate (Hard Rule)
+
+Before implementing code-level workarounds for deployment or infrastructure constraints (Railway root changes, environment variable hacks, sys.path manipulation, custom routing layers), always check the platform's native feature set first:
+- Railway: Watch Paths, project-level env vars, custom start commands, build settings
+- Supabase: RLS policies, database functions, triggers, extensions
+- Meta API: webhook validation, message templates, interactive components
+- Google Calendar API: service account sharing, event visibility settings
+
+**Why this exists:** The 2026-04-24 Railway isolation issue was solved with Watch Paths (a native Railway feature) after 4 commits of code changes (root to `/engine`, sys.path hack, GitHub Actions workflow) were attempted and fully reverted. All 4 commits were avoidable.
+
+**When to apply:** Any time a task involves deployment configuration, cloud platform constraints, or third-party API limitations.
+
+### Backend Bypass Preference Rule (Hard Rule)
+
+For high-frequency deterministic flows where intent is unambiguous (confirmation, cancellation, yes/no branching, single-action shortcuts), prefer backend logic over LLM orchestration. Backend bypass pattern:
+1. Detect intent signal (keyword match, button press, reply-to-message context)
+2. Verify preconditions (e.g., `pending_confirmation` booking exists)
+3. Call tool directly without LLM invocation
+4. Return structured response to user
+
+Prompt engineering is the fallback for ambiguous or low-frequency interactions where context complexity justifies LLM cost.
+
+**Why this exists:** The 2026-04-24 Slice 2 booking confirmation loop required 3 commits to fix via prompt tuning, history deduplication, and guardrail expansion. Backend bypass (`message_handler.py` detects affirmative + pending booking → calls `confirm_booking` directly) eliminated the entire class of LLM confusion on first attempt.
+
+**When to apply:** User confirms/cancels an action, replies yes/no to a binary question, or takes a shortcut action (e.g., "book the first slot"). If the intent and preconditions are programmatically detectable, bypass the LLM.
+
+### Integration Fallback Strategy Rule (Hard Rule)
+
+All external integration points (webhooks, reply-to-message, third-party API callbacks, event-driven flows) must include fallback logic for stale, missing, or out-of-order identifiers. Integration design requires:
+1. **Primary path:** Expected identifier present and valid (e.g., `alert_msg_id` matches latest escalation)
+2. **Recovery path:** Identifier missing/stale — fallback to secondary lookup (e.g., extract phone number from historical message, find latest unresolved escalation for that customer)
+3. **Error path:** No valid match found — log incident, send graceful user-facing error, do not crash
+
+Do NOT assume external systems will deliver identifiers in the expected order or state. Reply-to-message can reference old alerts. Webhooks can arrive out of order. Callbacks can contain stale references.
+
+**Why this exists:** The 2026-04-24 escalation reset failure occurred when a human agent replied "done" to an older alert. `reset_handler.py` looked up `escalation_tracking` by exact `alert_msg_id`, but newer unresolved escalations existed with different IDs. Primary lookup failed. Fix required fallback recovery: extract phone from historical alert → find latest unresolved escalation.
+
+**When to apply:** Any integration that depends on message IDs, webhook payloads, event references, or third-party identifiers. If the identifier can become stale or ambiguous, design fallback recovery before the primary integration goes live.
+
+### External Sync Primary Key Stability Rule (Hard Rule)
+
+Sync layers to external systems without native foreign keys (Google Sheets, third-party CRMs, flat file exports) must use a primary key that:
+1. **Exists from first write** — key field must be populated when the record is created, not added later
+2. **Stable across all states** — key must not change when record transitions between states (pending → confirmed, draft → published, new → updated)
+3. **Unique and deterministic** — key must uniquely identify the record and produce the same value on every sync operation
+
+For bookings: use `booking_id` (stable, exists immediately) NOT `id` (nullable, assigned only after confirmation).  
+For customers: use `phone_number` or stable `customer_id` NOT row index or mutable fields.
+
+**Why this exists:** The 2026-04-24 Google Sheets duplicate booking rows issue occurred because `_booking_to_row()` used `id or booking_id` as the first column (row key). Pending write used `booking_id` (no numeric `id` yet). Confirmed write used `id` (now present). `_sync_row()` matched by first column — treated them as different rows, appended instead of updating. Fix: consistently prefer `booking_id or id` so pending and confirmed map to same row.
+
+**When to apply:** Any sync integration to external systems (Sheets, third-party APIs, data exports). Define the stable key upfront in the architecture phase. Test with records in all lifecycle states (pending, confirmed, cancelled, expired) to verify key stability.
+
+---
+
 ## Migration Gating Rules
 
 n8n docs in `clients/hey-aircon/plans/build/` are **preserved and untouched** until:

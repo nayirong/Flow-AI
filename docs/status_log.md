@@ -86,6 +86,76 @@
 
 ## Session Log
 
+| Date | Phase | Description | Status |
+|------|-------|-------------|--------|
+| 2026-04-24 | Post-mortem | Slice 2 booking confirmation + Railway deployment isolation + escalation reset fallback + Sheets row key fix — 4 rework clusters, 20 commits | Complete |
+
+---
+
+## Post-mortem — 2026-04-24
+
+### What broke / caused rework
+
+**1. Railway deployment isolation (4 commits, mostly rework)**
+- **Root cause:** Jumped to code changes (`railway.json` root to `/engine`, sys.path hack in `engine/main.py`) before checking whether Railway Watch Paths feature was available. Watch Paths was available on the user's plan and solved the problem with zero code changes. All 4 commits were avoidable.
+- **Files touched:** `railway.json`, `Procfile`, `engine/main.py`, `.github/workflows/railway-deploy.yml`
+
+**2. Slice 2 booking confirmation loop (3 commits)**
+- **Symptoms:** Replying "yes" or "confirm" caused agent to re-ask for confirmation and create duplicate `pending_confirmation` bookings.
+- **Root causes:**
+  - Current inbound message included twice in conversation history (once fetched, once prepended) — LLM confused about current state
+  - LLM couldn't reliably recover `booking_id` from conversation history across turns
+  - Prompt ambiguity: "get their agreement before write_booking" caused LLM to ask again even after availability was confirmed
+  - Guardrail keyword list too narrow — missed premature summary phrases like "reply yes to confirm"
+- **Fixes:** Backend bypass (`message_handler.py` detects affirmative + pending booking → calls `confirm_booking` directly without LLM), dedup history, prompt clarification, broadened guardrail
+- **Files touched:** `engine/core/message_handler.py`, `engine/core/context_builder.py`, `engine/core/tools/definitions.py`, `engine/core/agent_runner.py`
+
+**3. Escalation reset failure (1 commit)**
+- **Symptom:** Human agent replied "done" to older alert, got "No pending escalation found for this alert"
+- **Root cause:** `reset_handler.py` looked up `escalation_tracking` by exact `alert_msg_id`. When newer unresolved escalations existed with different IDs, match failed.
+- **Fix:** Fallback recovery — if no row matches `alert_msg_id`, look up phone number from historical alert and find latest unresolved escalation for that customer.
+- **Files touched:** `engine/core/reset_handler.py`
+
+**4. Google Sheets duplicate booking rows (1 commit)**
+- **Symptom:** Sheets showed 2 rows per booking (one `pending_confirmation`, one `confirmed`). Supabase was correct.
+- **Root cause:** `_booking_to_row()` first column used `id or booking_id`. Pending write used `booking_id` (no numeric `id` yet). Confirmed write used numeric `id`. `_sync_row()` matches by first column — treated them as two different rows.
+- **Fix:** Changed row key to consistently prefer `booking_id or id` so pending and confirmed states map to same row.
+- **Files touched:** `engine/integrations/google_sheets.py`
+
+---
+
+### What went well
+
+- **Backend bypass pattern worked immediately** — Detecting affirmative intent + pending booking before calling LLM eliminated the confirmation loop on first attempt. High-frequency happy paths should bypass LLM where feasible.
+- **Regression tests caught all regressions** — Each fix was validated with unit tests (`test_message_handler.py`, `test_reset_handler.py`, `test_context_builder.py`, `test_agent_runner.py`, `test_google_sheets.py`). No silent breakage.
+- **Fallback recovery pattern saved escalation reset** — Exact ID matching failed, but fallback to phone number lookup recovered the case without data loss or manual intervention.
+- **Railway Watch Paths discovery avoided permanent code smell** — Reverted all sys.path hacks before they became permanent. Clean solution exists and is now in use.
+
+---
+
+### Process gaps
+
+**Gap 1: No "check platform features before implementation" gate**  
+Railway Watch Paths was available but never checked. Result: 4 commits of unnecessary code changes that were fully reverted.
+
+**Gap 2: Backend bypass pattern not preferred over prompt engineering for high-frequency flows**  
+Confirmation loop was solvable with prompt tuning, but backend bypass (`detect intent → call tool`) was simpler, more reliable, and eliminated entire class of LLM confusion. Should be first choice for deterministic happy paths.
+
+**Gap 3: Integration edge cases lack fallback strategies**  
+Escalation reset worked for primary flow (latest alert), but failed for historical alerts. External integrations (reply-to-message, webhooks, third-party APIs) need "what if the primary identifier is stale?" fallback by default.
+
+**Gap 4: External sync layers lack "stable primary key" requirement**  
+Google Sheets row key switched between `id` and `booking_id` based on write timing. External sync to systems without native foreign keys needs explicit "key must be stable across all states" rule.
+
+---
+
+### Improvements locked in
+
+- Added **Platform Feature Check Gate (Hard Rule)** to AGENTS.md — Deployment/infrastructure changes must check platform docs first before implementing workarounds. Applies to Railway, Supabase, Meta API, Calendar API.
+- Added **Backend Bypass Preference Rule (Hard Rule)** to AGENTS.md — For high-frequency deterministic flows (confirmation, cancellation, simple branching), prefer backend logic over LLM when intent is unambiguous. Backend is faster, cheaper, and eliminates prompt drift.
+- Added **Integration Fallback Strategy Rule (Hard Rule)** to AGENTS.md — All external integration points (webhooks, reply-to-message, third-party APIs) must include fallback logic for stale/missing identifiers. Primary path + recovery path required.
+- Added **External Sync Primary Key Stability Rule (Hard Rule)** to AGENTS.md — Sync layers to external systems (Sheets, third-party CRMs) must use a primary key that is stable across all record states (pending → confirmed, draft → published, etc.). Key must exist and be consistent from first write.
+
 ---
 
 ## Feature Tracking
