@@ -88,7 +88,6 @@ async def _send_telegram_alert(message: str) -> None:
             await client.post(url, json={
                 "chat_id": chat_id,
                 "text": message,
-                "parse_mode": "Markdown",
                 "disable_web_page_preview": True,
             })
     except Exception as e:
