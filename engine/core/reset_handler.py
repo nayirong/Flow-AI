@@ -118,7 +118,54 @@ async def handle_human_agent_message(
             pass
         return
 
-    if not result.data:
+    escalation_row = result.data[0] if result.data else None
+
+    if escalation_row is None:
+        try:
+            historical_result = await (
+                db.table("escalation_tracking")
+                .select("phone_number")
+                .eq("alert_msg_id", context_message_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed historical escalation lookup for context_message_id={context_message_id}: {e}",
+                exc_info=True,
+            )
+            historical_result = None
+
+        historical_phone = None
+        if historical_result and historical_result.data:
+            historical_phone = historical_result.data[0].get("phone_number")
+
+        if historical_phone:
+            try:
+                latest_result = await (
+                    db.table("escalation_tracking")
+                    .select("*")
+                    .eq("phone_number", historical_phone)
+                    .is_("resolved_at", "null")
+                    .order("escalated_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                escalation_row = latest_result.data[0] if latest_result.data else None
+            except Exception as e:
+                logger.error(
+                    f"Failed fallback unresolved lookup for {historical_phone}: {e}",
+                    exc_info=True,
+                )
+                escalation_row = None
+
+            if escalation_row is not None:
+                logger.info(
+                    f"Recovered unresolved escalation for {historical_phone} via historical alert_msg_id={context_message_id} "
+                    f"(tracking_id={escalation_row['id']})"
+                )
+
+    if escalation_row is None:
         # No unresolved escalation found for this alert
         logger.info(
             f"No pending escalation found for alert_msg_id={context_message_id} — "
@@ -143,7 +190,6 @@ async def handle_human_agent_message(
         return
 
     # ── Step 4: Clear escalation flag ─────────────────────────────────────────
-    escalation_row = result.data[0]
     customer_phone = escalation_row["phone_number"]
 
     try:

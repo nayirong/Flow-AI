@@ -25,6 +25,7 @@ def _make_db(escalation_row=None):
     tracking_chain.eq.return_value = tracking_chain
     tracking_chain.is_.return_value = tracking_chain
     tracking_chain.limit.return_value = tracking_chain
+    tracking_chain.order.return_value = tracking_chain
 
     tracking_result = MagicMock()
     tracking_result.data = [escalation_row] if escalation_row else []
@@ -49,6 +50,45 @@ def _make_db(escalation_row=None):
     
     db.table = MagicMock(side_effect=table_selector)
     
+    return db, tracking_chain, customers_chain
+
+
+def _make_db_with_tracking_results(tracking_results):
+    """Mock DB where escalation_tracking queries return a sequence of results."""
+    tracking_chain = MagicMock()
+    tracking_chain.select.return_value = tracking_chain
+    tracking_chain.update.return_value = tracking_chain
+    tracking_chain.eq.return_value = tracking_chain
+    tracking_chain.is_.return_value = tracking_chain
+    tracking_chain.limit.return_value = tracking_chain
+    tracking_chain.order.return_value = tracking_chain
+
+    async def tracking_execute():
+        if tracking_results:
+            data = tracking_results.pop(0)
+        else:
+            data = []
+        return MagicMock(data=data)
+
+    tracking_chain.execute = AsyncMock(side_effect=tracking_execute)
+
+    customers_chain = MagicMock()
+    customers_chain.update.return_value = customers_chain
+    customers_chain.eq.return_value = customers_chain
+    customers_chain.select.return_value = customers_chain
+    customers_chain.limit.return_value = customers_chain
+    customers_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    db = MagicMock()
+
+    def table_selector(name):
+        if name == "escalation_tracking":
+            return tracking_chain
+        if name == "customers":
+            return customers_chain
+        return MagicMock()
+
+    db.table = MagicMock(side_effect=table_selector)
     return db, tracking_chain, customers_chain
 
 
@@ -131,6 +171,45 @@ async def test_already_resolved_alert_sends_not_found(mock_send):
     mock_send.assert_awaited_once()
     call_args = mock_send.call_args
     assert "No pending escalation" in call_args[0][2]
+
+
+@pytest.mark.asyncio
+@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+async def test_historical_alert_recovers_latest_unresolved_escalation(mock_send):
+    """Replying to an older alert can clear the latest unresolved escalation for that customer."""
+    from engine.core.reset_handler import handle_human_agent_message
+
+    latest_unresolved = {
+        "id": 2,
+        "phone_number": "6591234567",
+        "alert_msg_id": None,
+        "escalated_at": datetime.now(timezone.utc).isoformat(),
+        "escalation_reason": "Latest unresolved",
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+
+    db, tracking_chain, customers_chain = _make_db_with_tracking_results([
+        [],
+        [{"phone_number": "6591234567"}],
+        [latest_unresolved],
+    ])
+    cfg = _make_client_config()
+
+    await handle_human_agent_message(
+        db=db,
+        client_config=cfg,
+        phone_number="6590000001",
+        message_text="done",
+        context_message_id="wamid.oldalert123",
+    )
+
+    customers_chain.update.assert_called()
+    update_call = customers_chain.update.call_args[0][0]
+    assert update_call["escalation_flag"] is False
+    assert tracking_chain.update.call_count >= 1
+    confirmation = mock_send.call_args[0][2]
+    assert "cleared" in confirmation.lower()
 
 
 @pytest.mark.asyncio
