@@ -109,7 +109,7 @@ def _booking_to_row(data: dict) -> list:
     - booking_status → status
     """
     return [
-        str(data.get("id") or data.get("booking_id", "")),
+        str(data.get("booking_id") or data.get("id", "")),
         str(data.get("phone_number", "")),
         str(data.get("customer_name", "")),
         str(data.get("service_type", "")),
@@ -326,7 +326,7 @@ async def sync_booking_to_sheets(
         )
         
         row_data = _booking_to_row(booking_data)
-        row_id = str(booking_data.get("id") or booking_data.get("booking_id", ""))
+        row_id = str(booking_data.get("booking_id") or booking_data.get("id", ""))
         
         await loop.run_in_executor(
             None,
@@ -347,7 +347,7 @@ async def sync_booking_to_sheets(
     except Exception as e:
         logger.error(
             f"Sheets sync failed | client={client_id} table=bookings "
-            f"row_id={booking_data.get('id') or booking_data.get('booking_id')} "
+            f"row_id={booking_data.get('booking_id') or booking_data.get('id')} "
             f"error={type(e).__name__}: {e}",
             exc_info=True,
         )
@@ -359,7 +359,7 @@ async def sync_booking_to_sheets(
                 error_type=type(e).__name__,
                 error_message=str(e),
                 client_id=client_id,
-                context={"row_id": str(booking_data.get("id") or booking_data.get("booking_id", ""))},
+                context={"row_id": str(booking_data.get("booking_id") or booking_data.get("id", ""))},
             ))
         except Exception:
             pass  # Observability must never raise

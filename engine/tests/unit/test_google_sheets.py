@@ -285,6 +285,65 @@ async def test_sync_booking_to_sheets():
 
 
 @pytest.mark.asyncio
+async def test_sync_booking_to_sheets_updates_existing_pending_row_by_booking_id():
+    """Confirmed sync must update the pending row, not append a second row."""
+    config = MockClientConfig()
+    booking_data = {
+        "id": 24,
+        "booking_id": "HA-20260429-ABCD",
+        "phone_number": "1234567890",
+        "customer_name": "John Doe",
+        "service_type": "Aircon Servicing",
+        "unit_count": "2",
+        "slot_date": "2026-04-29",
+        "slot_window": "PM",
+        "address": "123 Main St",
+        "postal_code": "123456",
+        "notes": "Call before arriving",
+        "booking_status": "confirmed",
+        "created_at": "2026-04-20T00:00:00Z",
+    }
+
+    mock_gc = MagicMock()
+    mock_spreadsheet = MagicMock()
+    mock_worksheet = MagicMock()
+    mock_worksheet.get_all_values.return_value = [
+        BOOKING_HEADERS,
+        [
+            "HA-20260429-ABCD",
+            "1234567890",
+            "John Doe",
+            "Aircon Servicing",
+            "2",
+            "",
+            "2026-04-29",
+            "PM",
+            "123 Main St",
+            "123456",
+            "",
+            "pending_confirmation",
+            "2026-04-20 08:00 SGT",
+        ],
+    ]
+    mock_spreadsheet.worksheet.return_value = mock_worksheet
+    mock_gc.open_by_key.return_value = mock_spreadsheet
+
+    with patch("engine.integrations.google_sheets._build_sheets_client", return_value=mock_gc):
+        with patch("asyncio.get_event_loop") as mock_loop:
+            async def run_in_executor(executor, fn, *args):
+                return fn(*args) if fn else None
+            mock_loop.return_value.run_in_executor = run_in_executor
+
+            await sync_booking_to_sheets("test-client", config, booking_data)
+
+    mock_worksheet.update.assert_called_once()
+    updated_row = mock_worksheet.update.call_args[0][1][0]
+    assert updated_row[0] == "HA-20260429-ABCD"
+    assert updated_row[11] == "confirmed"
+    mock_worksheet.append_row.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_booking_sync_handles_missing_fields():
     """Test that booking sync handles missing optional fields gracefully."""
     config = MockClientConfig()
