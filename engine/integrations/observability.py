@@ -59,10 +59,16 @@ Required env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_ALERT_CHAT_ID.
 """
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)  # prevent token exposure in request URL logs
+
+# In-memory cooldown to prevent alert flooding.
+# Keyed by alert source; value is the timestamp of the last Telegram send.
+_alert_cooldown: dict[str, datetime] = {}
+ALERT_COOLDOWN_SECONDS = 900  # 15 minutes per source
 
 _TIER2_ACTION_NOTES = {
     "escalation_human_alert": "Human agent WhatsApp alert failed. Escalation flag is still set in DB.\nManual follow-up required.",
@@ -75,8 +81,24 @@ _TIER2_ACTION_NOTES = {
 
 # ── Telegram transport ────────────────────────────────────────────────────────
 
-async def _send_telegram_alert(message: str) -> None:
-    """Send to Telegram group. No-op when env vars absent. Never raises."""
+async def _send_telegram_alert(message: str, source: str = "") -> None:
+    """Send to Telegram group. No-op when env vars absent. Never raises.
+
+    When source is provided, suppresses the send if the same source fired
+    within the last ALERT_COOLDOWN_SECONDS to prevent flooding.
+    Supabase writes are unaffected — only the Telegram send is throttled.
+    """
+    if source:
+        now = datetime.now(timezone.utc)
+        last_sent = _alert_cooldown.get(source)
+        if last_sent and (now - last_sent) < timedelta(seconds=ALERT_COOLDOWN_SECONDS):
+            logger.debug(
+                "Telegram alert suppressed (cooldown active): source=%s last_sent=%s",
+                source, last_sent.isoformat(),
+            )
+            return
+        _alert_cooldown[source] = now
+
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
     if not bot_token or not chat_id:
@@ -129,7 +151,7 @@ async def send_telegram_alert(
             f"{context_lines}\n"
             f"\n{note}"
         )
-        await _send_telegram_alert(message)
+        await _send_telegram_alert(message, source=source)
     except Exception:
         pass
 
@@ -287,6 +309,6 @@ async def log_noncritical_failure(
             f"Client: `{client_id or 'unknown'}`\n"
             f"Error: `{error_type}` — {str(error_message)[:200]}"
         )
-        await _send_telegram_alert(alert_text)
+        await _send_telegram_alert(alert_text, source=source)
     except Exception:
         pass  # Telegram path must never propagate
