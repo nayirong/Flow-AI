@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
-    model_config = ConfigDict(env_file=".env", case_sensitive=False)
+    model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 
 # Lazy singleton — only instantiated on first access so tests can set env vars first.
