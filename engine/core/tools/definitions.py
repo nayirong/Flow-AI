@@ -41,11 +41,12 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "write_booking",
         "description": (
-            "Confirm and write a booking. Creates a Google Calendar event and records "
-            "the booking in the database. Only call this AFTER the customer has explicitly "
-            "confirmed all booking details (service type, date, time window, address, "
-            "number of units). Do NOT call this to check availability — use "
-            "check_calendar_availability first."
+            "Record a pending booking in the database. Does NOT create a Google Calendar event yet. "
+            "Call this AFTER the customer has provided all booking details AND confirmed the slot. "
+            "Returns a booking_id and a summary for you to send to the customer. "
+            "After calling this, send the customer a booking summary and ask them to confirm. "
+            "Once they reply affirmatively, call confirm_booking to finalise the appointment. "
+            "Do NOT call this to check availability — use check_calendar_availability first."
         ),
         "input_schema": {
             "type": "object",

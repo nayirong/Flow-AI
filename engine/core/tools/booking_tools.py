@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 _BOOKING_FAILURE_ALERT_TEMPLATE = (
     "⚠️ *Booking Backend Failure — Action Required*\n\n"
-    "A booking was confirmed with the customer but a backend error occurred.\n\n"
+    "A booking was pending confirmation but a backend error occurred.\n\n"
     "Customer: {phone_number}\n"
     "Name: {customer_name}\n"
     "Service: {service_type} ({unit_count} units)\n"
@@ -105,12 +105,12 @@ async def write_booking(
     notes: Optional[str] = None,
 ) -> dict:
     """
-    Confirm a booking: create Google Calendar event + INSERT into bookings table.
+    Record a pending booking in the database. Does NOT create a Google Calendar event.
 
-    Also updates the customers record with name captured during booking.
-
-    This is an atomic operation from the agent's perspective — both the calendar event
-    and the DB row must succeed. If the calendar write fails, the booking is not created.
+    This is Phase 1 of the two-phase booking flow:
+    - Phase 1 (this function): Record booking details with pending_confirmation status
+    - Phase 2 (confirm_booking): After customer confirms, create calendar event and
+      update status to confirmed
 
     Args:
         db:            Supabase async client (injected).
@@ -127,10 +127,13 @@ async def write_booking(
         notes:         Optional free-text notes.
 
     Returns:
-        dict: {booking_id, status, slot_date, slot_window, service_type, calendar_event_id}
+        dict: {booking_id, status, slot_date, slot_window, service_type, message}
+              status will be "pending_confirmation"
+              message contains instructions for the agent to send summary and wait for confirmation
 
     Raises:
-        Exception if Google Calendar write or Supabase INSERT fails.
+        ValueError if address is empty.
+        Exception if Supabase INSERT fails.
         Caller (agent_runner._execute_tool) catches and returns error dict to Claude.
     """
     if not address:
@@ -141,65 +144,7 @@ async def write_booking(
 
     booking_id = _generate_booking_id(slot_date)
 
-    # ── Step 1: Create Google Calendar event (mandatory — no booking without it) ──
-    if not client_config.google_calendar_creds or not client_config.google_calendar_id:
-        error_msg = (
-            f"Google Calendar not configured for {client_config.client_id} "
-            "— cannot confirm booking without calendar event"
-        )
-        logger.error(error_msg)
-        await _alert_booking_failure(
-            client_config=client_config,
-            phone_number=phone_number,
-            customer_name=customer_name,
-            service_type=service_type,
-            unit_count=unit_count,
-            address=address,
-            postal_code=postal_code,
-            slot_date=slot_date,
-            slot_window=slot_window,
-            error="Google Calendar credentials not configured on this client.",
-        )
-        raise RuntimeError(error_msg)
-
-    from engine.integrations.google_calendar import create_booking_event
-
-    try:
-        calendar_event_id = await create_booking_event(
-            google_calendar_creds=client_config.google_calendar_creds,
-            calendar_id=client_config.google_calendar_id,
-            booking_id=booking_id,
-            customer_name=customer_name,
-            phone_number=phone_number,
-            service_type=service_type,
-            unit_count=unit_count,
-            address=address,
-            postal_code=postal_code,
-            slot_date=slot_date,
-            slot_window=slot_window,
-            aircon_brand=aircon_brand,
-            notes=notes,
-        )
-    except Exception as calendar_err:
-        logger.error(
-            f"Calendar write failed for booking {booking_id} ({phone_number}): {calendar_err}",
-            exc_info=True,
-        )
-        await _alert_booking_failure(
-            client_config=client_config,
-            phone_number=phone_number,
-            customer_name=customer_name,
-            service_type=service_type,
-            unit_count=unit_count,
-            address=address,
-            postal_code=postal_code,
-            slot_date=slot_date,
-            slot_window=slot_window,
-            error=str(calendar_err),
-        )
-        raise  # Re-raise so agent receives error and tells customer to wait for human
-
-    # ── Step 2: INSERT booking row (only reached after successful calendar write) ─
+    # ── INSERT booking row with pending_confirmation status ───────────────────────
     # Note: customer_name is NOT a column in the bookings table — it lives in
     # customers. We keep it in the dict only so Sheets sync can include it;
     # it is NOT sent to Supabase (excluded from db_booking_row below).
@@ -214,16 +159,16 @@ async def write_booking(
         "postal_code": postal_code,
         "slot_date": slot_date,
         "slot_window": slot_window,
-        "booking_status": "Confirmed",
+        "booking_status": "pending_confirmation",
         "created_at": _created_at,
     }
     db_booking_row = {k: v for k, v in booking_row.items() if k != "customer_name"}
-    if calendar_event_id:
-        booking_row["calendar_event_id"] = calendar_event_id
     if aircon_brand:
         booking_row["aircon_brand"] = aircon_brand
+        db_booking_row["aircon_brand"] = aircon_brand
     if notes:
         booking_row["notes"] = notes
+        db_booking_row["notes"] = notes
 
     try:
         await db.table("bookings").insert(db_booking_row).execute()
@@ -235,8 +180,7 @@ async def write_booking(
         ))
     except Exception as db_err:
         logger.error(
-            f"DB write failed for booking {booking_id} ({phone_number}) "
-            f"— calendar event {calendar_event_id} was already created: {db_err}",
+            f"DB write failed for booking {booking_id} ({phone_number}): {db_err}",
             exc_info=True,
         )
         await _alert_booking_failure(
@@ -249,57 +193,25 @@ async def write_booking(
             postal_code=postal_code,
             slot_date=slot_date,
             slot_window=slot_window,
-            error=f"Calendar event created ({calendar_event_id}) but DB write failed: {db_err}",
+            error=f"DB write failed: {db_err}",
         )
         raise
 
-    # ── Step 3: Update customer name + sync to Sheets ────────────────────────────
-    # total_bookings is maintained by a Supabase DB trigger on booking INSERT.
-    # Re-fetch the customer after the booking row is written so the Sheets sync
-    # receives the trigger-updated count, not the pre-booking value.
-    try:
-        await (
-            db.table("customers")
-            .update({"customer_name": customer_name})
-            .eq("phone_number", phone_number)
-            .execute()
-        )
-        # Re-fetch to pick up trigger-updated total_bookings
-        refreshed = await (
-            db.table("customers")
-            .select("*")
-            .eq("phone_number", phone_number)
-            .limit(1)
-            .execute()
-        )
-        if refreshed.data:
-            asyncio.create_task(sync_customer_to_sheets(
-                client_id=client_config.client_id,
-                client_config=client_config,
-                customer_data=refreshed.data[0],
-            ))
-    except Exception as e:
-        # Non-fatal — booking row already written.
-        logger.warning(
-            f"Failed to update customer record for {phone_number} "
-            f"after booking {booking_id}: {e}"
-        )
-
     logger.info(
-        f"Booking {booking_id} written for {phone_number} "
+        f"Pending booking {booking_id} recorded for {phone_number} "
         f"({slot_date} {slot_window}, {service_type})"
     )
 
     return {
         "booking_id": booking_id,
-        "status": "Confirmed",
+        "status": "pending_confirmation",
         "slot_date": slot_date,
         "slot_window": slot_window,
         "service_type": service_type,
-        "calendar_event_id": calendar_event_id,
         "message": (
-            f"Booking confirmed! Your reference is {booking_id}. "
-            f"We'll see you on {slot_date} ({slot_window} slot) for {service_type}."
+            f"Booking details recorded (Reference: {booking_id}). "
+            "Send the customer a summary: their service, date, time slot, and address. "
+            "Ask them to confirm. Once they reply yes, call confirm_booking with this booking_id."
         ),
     }
 
