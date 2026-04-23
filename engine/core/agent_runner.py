@@ -540,6 +540,8 @@ async def run_agent(
                         "content": (
                             "[SYSTEM CORRECTION] You have not called write_booking yet. "
                             "You must take one of the following actions now — do not respond with text: "
+                            "If check_calendar_availability already confirmed the customer's requested slot is available, "
+                            "that already counts as agreement for write_booking. Do NOT ask for a second confirmation before write_booking. "
                             "(1) The ONLY required fields for write_booking are: customer_name, service_type, "
                             "unit_count, address, postal_code, slot_date, slot_window. BTU size, aircon brand, "
                             "and other optional details are NOT required — do not block on them. "

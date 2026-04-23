@@ -82,6 +82,15 @@ async def test_system_message_contains_identity_block():
 
 
 @pytest.mark.asyncio
+async def test_system_message_forbids_second_confirmation_before_write_booking():
+    """Booking flow must tell the model not to ask for a second pre-write confirmation."""
+    db = _make_db()
+    msg = await build_system_message(db)
+    assert "Do NOT ask for a second confirmation before write_booking" in msg
+    assert "The ONLY confirmation you ask for is after the booking summary in Step 5" in msg
+
+
+@pytest.mark.asyncio
 async def test_system_message_sections_in_order():
     """Sections must appear in order: identity → SERVICES → PRICING → APPOINTMENT WINDOWS → POLICIES."""
     db = _make_db()

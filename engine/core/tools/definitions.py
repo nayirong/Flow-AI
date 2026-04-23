@@ -43,7 +43,8 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "write_booking",
         "description": (
             "Record a pending booking in the database. Does NOT create a Google Calendar event yet. "
-            "Call this AFTER the customer has provided all booking details AND confirmed the slot. "
+            "Call this AFTER the customer has provided all booking details and the requested slot has been verified as available. "
+            "If the customer already requested that exact date and AM/PM slot, do NOT ask for a second confirmation before calling this tool. "
             "Returns a booking_id and a summary for you to send to the customer. "
             "After calling this, send the customer a booking summary and ask them to confirm. "
             "Once they reply affirmatively, call confirm_booking to finalise the appointment. "
