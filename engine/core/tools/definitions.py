@@ -1,11 +1,12 @@
 """
 Anthropic-format tool definitions for the HeyAircon agent.
 
-These are the 4 tools the agent can call:
+These are the 5 tools the agent can call:
 1. check_calendar_availability — check AM/PM slot availability for a date
-2. write_booking               — confirm booking: calendar event + Supabase row
-3. get_customer_bookings       — retrieve customer's recent bookings
-4. escalate_to_human           — set escalation flag + notify human agent
+2. write_booking               — create pending booking in DB (requires confirmation)
+3. confirm_booking             — finalise pending booking (conflict check + calendar event)
+4. get_customer_bookings       — retrieve customer's recent bookings
+5. escalate_to_human           — set escalation flag + notify human agent
 
 Format: Anthropic tools API (https://docs.anthropic.com/en/docs/tool-use)
 """
@@ -101,6 +102,30 @@ TOOL_DEFINITIONS: list[dict] = [
                 "slot_date",
                 "slot_window",
             ],
+        },
+    },
+    {
+        "name": "confirm_booking",
+        "description": (
+            "Finalise a pending booking after the customer has explicitly confirmed. "
+            "Checks for slot conflicts, creates the Google Calendar event, and updates "
+            "the booking status to 'confirmed'. "
+            "Only call this after the customer replies affirmatively to the booking summary. "
+            "You MUST pass the booking_id returned by write_booking earlier in this conversation. "
+            "Do NOT call this without a booking_id — if you don't have one, call write_booking first."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "booking_id": {
+                    "type": "string",
+                    "description": (
+                        "The booking ID returned by write_booking (format: HA-YYYYMMDD-XXXX). "
+                        "This must be from the current conversation — do not guess or fabricate it."
+                    ),
+                },
+            },
+            "required": ["booking_id"],
         },
     },
     {
