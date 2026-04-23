@@ -363,7 +363,7 @@ async def run_agent(
         Final agent response text. Returns _FALLBACK_RESPONSE if both providers fail —
         message_handler will send this to the customer as a technical error message.
     """
-    from engine.integrations.observability import log_incident, log_usage, extract_usage, send_telegram_alert
+    from engine.integrations.observability import log_incident, log_usage, extract_usage, send_telegram_alert, log_noncritical_failure
 
     client = _get_llm_client(anthropic_api_key=anthropic_api_key)
     model = _get_model_name()
@@ -450,6 +450,17 @@ async def run_agent(
                         output_tokens=out_tok,
                         client_id=client_id,
                     )
+                    # Fallback succeeded — notify team via Telegram
+                    try:
+                        await log_noncritical_failure(
+                            source="llm_anthropic_fallback",
+                            error_type=type(llm_err).__name__,
+                            error_message=str(llm_err),
+                            client_id=client_id,
+                            context={"providers_failed": "Anthropic", "fallback_to": "OpenAI (gpt-4o-mini)"},
+                        )
+                    except Exception:
+                        pass
                 except Exception as fallback_err:
                     # Both providers failed — log and return graceful error string
                     await log_incident(
