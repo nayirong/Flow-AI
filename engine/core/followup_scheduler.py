@@ -332,13 +332,20 @@ async def process_t2h_followups(
         wamid = await send_message(client_config, phone_number, message_text)
         
         if wamid:
-            # Message sent successfully — update followup_stage
+            # Message sent successfully — update followup_stage and log outbound
             try:
+                now_ts = datetime.now(timezone.utc).isoformat()
                 await client_db.table("bookings").update({
                     "followup_stage": "2h_sent",
-                    "last_followup_sent_at": datetime.now(timezone.utc).isoformat(),
+                    "last_followup_sent_at": now_ts,
                 }).eq("booking_id", booking_id).execute()
-                
+                await client_db.table("interactions_log").insert({
+                    "phone_number": phone_number,
+                    "direction": "outbound",
+                    "message_text": message_text,
+                    "message_type": "text",
+                    "timestamp": now_ts,
+                }).execute()
                 sent += 1
                 logger.info(f"T+2h follow-up sent for booking {booking_id}")
             except Exception as e:
@@ -428,13 +435,20 @@ async def process_t24h_followups(
         wamid = await send_message(client_config, phone_number, message_text)
         
         if wamid:
-            # Message sent successfully — update followup_stage
+            # Message sent successfully — update followup_stage and log outbound
             try:
+                now_ts = datetime.now(timezone.utc).isoformat()
                 await client_db.table("bookings").update({
                     "followup_stage": "24h_sent",
-                    "last_followup_sent_at": datetime.now(timezone.utc).isoformat(),
+                    "last_followup_sent_at": now_ts,
                 }).eq("booking_id", booking_id).execute()
-                
+                await client_db.table("interactions_log").insert({
+                    "phone_number": phone_number,
+                    "direction": "outbound",
+                    "message_text": message_text,
+                    "message_type": "text",
+                    "timestamp": now_ts,
+                }).execute()
                 sent += 1
                 logger.info(f"T+24h follow-up sent for booking {booking_id}")
             except Exception as e:

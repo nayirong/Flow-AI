@@ -88,6 +88,7 @@ async def test_t2h_eligibility_sends_message(mock_client_db, mock_client_config,
         MagicMock(data=[{"escalation_flag": False}]),  # escalation check
         MagicMock(data=[]),  # customer reply check (no replies)
         MagicMock(data=[{"booking_id": "booking_123"}]),  # update booking
+        MagicMock(data=[{"id": 1}]),  # interactions_log insert
     ]
     
     with patch("engine.core.followup_scheduler.get_client_db", return_value=mock_client_db):
@@ -146,6 +147,7 @@ async def test_t24h_eligibility_sends_message(mock_client_db, mock_client_config
         MagicMock(data=[{"escalation_flag": False}]),  # escalation check
         MagicMock(data=[]),  # customer reply check (no replies)
         MagicMock(data=[{"booking_id": "booking_456"}]),  # update booking
+        MagicMock(data=[{"id": 1}]),  # interactions_log insert
     ]
     
     with patch("engine.core.followup_scheduler.send_message", return_value="wamid_456"):
@@ -345,6 +347,7 @@ async def test_message_template_interpolation(mock_client_db, mock_client_config
         MagicMock(data=[{"escalation_flag": False}]),  # escalation check
         MagicMock(data=[]),  # customer reply check (no replies)
         MagicMock(data=[{"booking_id": "booking_400"}]),  # update booking
+        MagicMock(data=[{"id": 1}]),  # interactions_log insert
     ]
     
     template = "Service: {service_type} on {slot_date} during {slot_window}"
