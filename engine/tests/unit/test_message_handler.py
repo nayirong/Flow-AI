@@ -20,6 +20,8 @@ from engine.core.message_handler import (
     handle_inbound_message,
     HOLDING_REPLY,
     FALLBACK_REPLY,
+    OPT_OUT_REPLY,
+    _is_opt_out_keyword,
 )
 
 
@@ -720,3 +722,301 @@ async def test_concurrent_messages_different_customers_are_independent(
         f"Task 1: {task_start[1]:.3f}–{task_end[1]:.3f}"
     )
     assert mock_run_agent.await_count == 2
+
+
+# ── Opt-Out Detection Tests ───────────────────────────────────────────────────
+
+
+class TestOptOutDetection:
+    """Tests for _is_opt_out_keyword helper."""
+
+    def test_stop_is_opt_out(self):
+        assert _is_opt_out_keyword("stop") is True
+
+    def test_stop_case_insensitive(self):
+        assert _is_opt_out_keyword("STOP") is True
+        assert _is_opt_out_keyword("Stop") is True
+
+    def test_stop_with_whitespace(self):
+        assert _is_opt_out_keyword("  stop  ") is True
+
+    def test_unsubscribe_is_opt_out(self):
+        assert _is_opt_out_keyword("unsubscribe") is True
+
+    def test_opt_out_hyphenated(self):
+        assert _is_opt_out_keyword("opt-out") is True
+        assert _is_opt_out_keyword("opt out") is True
+
+    def test_regular_message_not_opt_out(self):
+        assert _is_opt_out_keyword("I want to cancel my appointment") is False
+        assert _is_opt_out_keyword("yes") is False
+        assert _is_opt_out_keyword("stop the aircon please") is False
+
+    def test_empty_message_not_opt_out(self):
+        assert _is_opt_out_keyword("") is False
+        assert _is_opt_out_keyword(None) is False
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+async def test_opt_out_keyword_marks_booking_opted_out(
+    mock_run_agent, mock_load_config, mock_get_db, mock_send, mock_client_config_obj
+):
+    """'stop' with active pending booking → followup_stage set to 'opted_out'."""
+    mock_load_config.return_value = mock_client_config_obj
+
+    # Build chains for each table interaction
+    # 1. Escalation query returns non-escalated customer
+    escalation_chain = MagicMock()
+    escalation_chain.select.return_value = escalation_chain
+    escalation_chain.eq.return_value = escalation_chain
+    escalation_chain.limit.return_value = escalation_chain
+    escalation_chain.execute = AsyncMock(return_value=MagicMock(data=[{
+        "phone_number": "6591234567",
+        "escalation_flag": False,
+        "escalation_notified": False,
+        "customer_name": "Test User"
+    }]))
+
+    # 2. Customer upsert chain
+    upsert_chain = MagicMock()
+    upsert_chain.update.return_value = upsert_chain
+    upsert_chain.eq.return_value = upsert_chain
+    upsert_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # 3. Active followup booking query (with .not_)
+    not_mock = MagicMock()
+    not_mock.eq.return_value = not_mock
+    
+    booking_query_chain = MagicMock()
+    booking_query_chain.select.return_value = booking_query_chain
+    booking_query_chain.eq.return_value = booking_query_chain
+    booking_query_chain.not_ = not_mock
+    not_mock.order = MagicMock(return_value=not_mock)
+    not_mock.limit = MagicMock(return_value=not_mock)
+    not_mock.execute = AsyncMock(return_value=MagicMock(data=[{
+        "booking_id": "HA-TEST-001",
+        "followup_stage": "2h_sent",
+        "booking_status": "pending_confirmation"
+    }]))
+
+    # 4. Booking update chain
+    update_chain = MagicMock()
+    update_chain.update.return_value = update_chain
+    update_chain.eq.return_value = update_chain
+    update_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # 5. Interactions log chain (for inbound + outbound)
+    log_chain = MagicMock()
+    log_chain.insert.return_value = log_chain
+    log_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # Table routing logic
+    def table_router(table_name):
+        if table_name == "customers":
+            return escalation_chain
+        elif table_name == "bookings":
+            if not hasattr(table_router, "booking_call_count"):
+                table_router.booking_call_count = 0
+            table_router.booking_call_count += 1
+            if table_router.booking_call_count == 1:
+                return booking_query_chain
+            else:
+                return update_chain
+        elif table_name == "interactions_log":
+            return log_chain
+        return MagicMock()
+
+    db = MagicMock()
+    db.table = MagicMock(side_effect=table_router)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message("test-client", "6591234567", "stop", "text", "wamid.001", "Test User")
+
+    # Send_message must be called with OPT_OUT_REPLY
+    mock_send.assert_called_once()
+    call_args = mock_send.call_args[0]
+    assert OPT_OUT_REPLY in call_args[-1]
+
+    # Agent must NOT be called
+    mock_run_agent.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
+@patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+async def test_opt_out_no_active_booking_falls_through_to_agent(
+    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_load_config, mock_get_db, mock_send, mock_client_config_obj
+):
+    """'stop' with no active pending booking → passes through to agent."""
+    mock_load_config.return_value = mock_client_config_obj
+    mock_build_system.return_value = "System message"
+    mock_fetch_history.return_value = []
+    mock_run_agent.return_value = "Agent reply"
+
+    # 1. Escalation returns non-escalated customer
+    escalation_chain = MagicMock()
+    escalation_chain.select.return_value = escalation_chain
+    escalation_chain.eq.return_value = escalation_chain
+    escalation_chain.limit.return_value = escalation_chain
+    escalation_chain.execute = AsyncMock(return_value=MagicMock(data=[{
+        "phone_number": "6591234567",
+        "escalation_flag": False,
+        "escalation_notified": False,
+        "customer_name": "Test User"
+    }]))
+
+    # 2. Customer upsert chain
+    upsert_chain = MagicMock()
+    upsert_chain.update.return_value = upsert_chain
+    upsert_chain.eq.return_value = upsert_chain
+    upsert_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # 3. Active followup booking query returns empty (no pending bookings)
+    not_mock_1 = MagicMock()
+    not_mock_1.eq.return_value = not_mock_1
+    not_mock_1.order = MagicMock(return_value=not_mock_1)
+    not_mock_1.limit = MagicMock(return_value=not_mock_1)
+    not_mock_1.execute = AsyncMock(return_value=MagicMock(data=[]))  # Empty result
+
+    booking_query_chain = MagicMock()
+    booking_query_chain.select.return_value = booking_query_chain
+    booking_query_chain.eq.return_value = booking_query_chain
+    booking_query_chain.not_ = not_mock_1
+
+    # 4. _get_latest_pending_booking query (also returns empty)
+    pending_booking_chain = MagicMock()
+    pending_booking_chain.select.return_value = pending_booking_chain
+    pending_booking_chain.eq.return_value = pending_booking_chain
+    pending_booking_chain.order.return_value = pending_booking_chain
+    pending_booking_chain.limit.return_value = pending_booking_chain
+    pending_booking_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # 5. Interactions log chain
+    log_chain = MagicMock()
+    log_chain.insert.return_value = log_chain
+    log_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # Table routing
+    def table_router(table_name):
+        if table_name == "customers":
+            return escalation_chain
+        elif table_name == "bookings":
+            if not hasattr(table_router, "booking_call_count"):
+                table_router.booking_call_count = 0
+            table_router.booking_call_count += 1
+            if table_router.booking_call_count == 1:
+                return booking_query_chain  # For _get_active_followup_booking
+            else:
+                return pending_booking_chain  # For _get_latest_pending_booking
+        elif table_name == "interactions_log":
+            return log_chain
+        return MagicMock()
+
+    db = MagicMock()
+    db.table = MagicMock(side_effect=table_router)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message("test-client", "6591234567", "stop", "text", "wamid.001", "Test User")
+
+    mock_run_agent.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("engine.core.message_handler.send_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.get_client_db", new_callable=AsyncMock)
+@patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
+@patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
+async def test_opt_out_logs_outbound_to_interactions_log(
+    mock_run_agent, mock_load_config, mock_get_db, mock_send, mock_client_config_obj
+):
+    """Opt-out reply must be logged to interactions_log as outbound."""
+    mock_load_config.return_value = mock_client_config_obj
+
+    logged_rows = []
+
+    # 1. Escalation query returns non-escalated customer
+    escalation_chain = MagicMock()
+    escalation_chain.select.return_value = escalation_chain
+    escalation_chain.eq.return_value = escalation_chain
+    escalation_chain.limit.return_value = escalation_chain
+    escalation_chain.execute = AsyncMock(return_value=MagicMock(data=[{
+        "phone_number": "6591234567",
+        "escalation_flag": False,
+        "escalation_notified": False,
+        "customer_name": "Test User"
+    }]))
+
+    # 2. Customer upsert chain
+    upsert_chain = MagicMock()
+    upsert_chain.update.return_value = upsert_chain
+    upsert_chain.eq.return_value = upsert_chain
+    upsert_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # 3. Active followup booking query
+    not_mock = MagicMock()
+    not_mock.eq.return_value = not_mock
+    not_mock.order = MagicMock(return_value=not_mock)
+    not_mock.limit = MagicMock(return_value=not_mock)
+    not_mock.execute = AsyncMock(return_value=MagicMock(data=[{
+        "booking_id": "HA-TEST-001",
+        "followup_stage": "2h_sent",
+        "booking_status": "pending_confirmation"
+    }]))
+
+    booking_query_chain = MagicMock()
+    booking_query_chain.select.return_value = booking_query_chain
+    booking_query_chain.eq.return_value = booking_query_chain
+    booking_query_chain.not_ = not_mock
+
+    # 4. Booking update chain
+    update_chain = MagicMock()
+    update_chain.update.return_value = update_chain
+    update_chain.eq.return_value = update_chain
+    update_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # 5. Interactions log chain with capture
+    log_chain = MagicMock()
+
+    def capture_insert(row):
+        logged_rows.append(row)
+        mock_response = MagicMock()
+        mock_response.data = []
+        return log_chain
+
+    log_chain.insert = MagicMock(side_effect=capture_insert)
+    log_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    # Table routing
+    def table_router(table_name):
+        if table_name == "customers":
+            return escalation_chain
+        elif table_name == "bookings":
+            if not hasattr(table_router, "booking_call_count"):
+                table_router.booking_call_count = 0
+            table_router.booking_call_count += 1
+            if table_router.booking_call_count == 1:
+                return booking_query_chain
+            else:
+                return update_chain
+        elif table_name == "interactions_log":
+            return log_chain
+        return MagicMock()
+
+    db = MagicMock()
+    db.table = MagicMock(side_effect=table_router)
+    mock_get_db.return_value = db
+
+    await handle_inbound_message("test-client", "6591234567", "stop", "text", "wamid.001", "Test User")
+
+    # Check that OPT_OUT_REPLY was logged as outbound
+    outbound_rows = [r for r in logged_rows if r.get("direction") == "outbound"]
+    assert any(OPT_OUT_REPLY in r.get("message_text", "") for r in outbound_rows)

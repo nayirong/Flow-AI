@@ -54,6 +54,31 @@ FALLBACK_REPLY = (
     "We apologise for the inconvenience."
 )
 
+# Opt-out keywords — case-insensitive, matched against stripped normalised input.
+# These stop the follow-up sequence for the customer's latest pending booking.
+_OPT_OUT_KEYWORDS = frozenset({
+    "stop",
+    "unsubscribe",
+    "opt out",
+    "opt-out",
+    "no follow up",
+    "no follow-up",
+    "stop messaging",
+    "stop sending",
+    "dont contact me",
+    "do not contact me",
+    "remove me",
+    "no more messages",
+    "cancel reminders",
+    "cancel follow up",
+    "cancel follow-up",
+})
+
+OPT_OUT_REPLY = (
+    "Understood! We won't send any more follow-up messages about your upcoming appointment. "
+    "If you'd like to book a service or need help, feel free to message us anytime."
+)
+
 _AFFIRMATIVE_CONFIRMATION_PATTERNS = [
     "yes",
     "y",
@@ -79,6 +104,13 @@ def _is_affirmative_confirmation(message_text: str) -> bool:
     normalised = re.sub(r"[^a-z0-9\s]+", " ", (message_text or "").lower())
     normalised = " ".join(normalised.split())
     return normalised in _AFFIRMATIVE_CONFIRMATION_PATTERNS
+
+
+def _is_opt_out_keyword(message_text: str) -> bool:
+    """Return True if the message matches a recognised opt-out keyword."""
+    normalised = re.sub(r"[^a-z0-9\s]+", " ", (message_text or "").lower())
+    normalised = " ".join(normalised.split())
+    return normalised in _OPT_OUT_KEYWORDS
 
 
 def _remove_current_inbound_from_history(
@@ -126,6 +158,34 @@ async def _get_latest_pending_booking(db, phone_number: str) -> dict | None:
     if not booking.get("booking_id"):
         return None
     return booking
+
+
+async def _get_active_followup_booking(db, phone_number: str) -> dict | None:
+    """
+    Fetch the newest booking eligible for opt-out.
+
+    Eligible = booking_status is 'pending_confirmation' AND followup_stage is NOT already 'opted_out'.
+    """
+    try:
+        result = await (
+            db.table("bookings")
+            .select("booking_id, followup_stage, booking_status")
+            .eq("phone_number", phone_number)
+            .eq("booking_status", "pending_confirmation")
+            .not_.eq("followup_stage", "opted_out")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch active followup booking for %s: %s",
+            phone_number,
+            e,
+            exc_info=True,
+        )
+        return None
 
 
 async def handle_inbound_message(
@@ -316,6 +376,53 @@ async def handle_inbound_message(
                 exc_info=True,
             )
             # Upsert failure is non-fatal — continue to agent.
+
+        # ── Step 5b: Opt-out detection (pre-agent gate) ───────────────────────
+        # If customer sends an opt-out keyword and has an active pending booking,
+        # mark followup_stage = 'opted_out', send confirmation, and return.
+        # Agent is NOT invoked. This runs before the affirmative confirmation check.
+        if _is_opt_out_keyword(message_text):
+            active_booking = await _get_active_followup_booking(db, phone_number)
+            if active_booking:
+                try:
+                    await db.table("bookings").update(
+                        {"followup_stage": "opted_out"}
+                    ).eq("booking_id", active_booking["booking_id"]).execute()
+                    logger.info(
+                        "Opt-out detected for %s — booking %s marked opted_out",
+                        phone_number,
+                        active_booking["booking_id"],
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Failed to mark opt-out for booking %s: %s",
+                        active_booking.get("booking_id"),
+                        e,
+                        exc_info=True,
+                    )
+                _now = datetime.now(timezone.utc).isoformat()
+                try:
+                    await send_message(client_config, phone_number, OPT_OUT_REPLY)
+                    await db.table("interactions_log").insert({
+                        "timestamp": _now,
+                        "phone_number": phone_number,
+                        "direction": "outbound",
+                        "message_text": OPT_OUT_REPLY,
+                        "message_type": "text",
+                    }).execute()
+                except Exception as e:
+                    logger.error(
+                        "Failed to send/log opt-out reply to %s: %s",
+                        phone_number,
+                        e,
+                        exc_info=True,
+                    )
+                return  # Agent does NOT run after opt-out is processed.
+            # No active pending booking — fall through to normal agent handling.
+            logger.debug(
+                "Opt-out keyword received from %s but no active pending booking found — passing to agent",
+                phone_number,
+            )
 
         # ── Step 6: Context builder → agent runner → send reply ───────────────
         # Acquire per-customer lock before running the agent. This serializes
