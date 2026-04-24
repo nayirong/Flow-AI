@@ -17,6 +17,7 @@ from fastapi.responses import PlainTextResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from engine.config.client_config import load_client_config, ClientNotFoundError
+from engine.config.settings import get_settings
 from engine.core.message_handler import handle_inbound_message
 from engine.core.followup_scheduler import run_followup_scheduler
 
@@ -31,15 +32,16 @@ async def lifespan(app: FastAPI):
     Starts the follow-up scheduler on startup, shuts it down on shutdown.
     """
     scheduler = AsyncIOScheduler()
+    interval_minutes = get_settings().scheduler_interval_minutes
     scheduler.add_job(
         run_followup_scheduler,
         trigger="interval",
-        minutes=60,
+        minutes=interval_minutes,
         id="followup_scheduler",
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("Follow-up scheduler started (interval: 60 min)")
+    logger.info(f"Follow-up scheduler started (interval: {interval_minutes} min)")
     yield
     scheduler.shutdown(wait=False)
     logger.info("Follow-up scheduler stopped")

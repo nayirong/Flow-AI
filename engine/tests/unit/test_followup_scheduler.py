@@ -17,6 +17,8 @@ from engine.core.followup_scheduler import (
     is_customer_escalated,
     has_customer_replied_since,
     get_message_template,
+    FollowupTimingConfig,
+    load_followup_timing_config,
 )
 
 
@@ -57,8 +59,14 @@ def mock_client_config():
     return config
 
 
+@pytest.fixture
+def default_timing():
+    """Default FollowupTimingConfig — same as production defaults."""
+    return FollowupTimingConfig()
+
+
 @pytest.mark.asyncio
-async def test_t2h_eligibility_sends_message(mock_client_db, mock_client_config):
+async def test_t2h_eligibility_sends_message(mock_client_db, mock_client_config, default_timing):
     """
     T+2h eligible booking (created 3h ago, followup_stage=None, no reply, not escalated)
     should send message and update followup_stage to '2h_sent'.
@@ -86,6 +94,7 @@ async def test_t2h_eligibility_sends_message(mock_client_db, mock_client_config)
                 mock_client_config,
                 mock_client_db,
                 "Hi! {service_type} on {slot_date} ({slot_window})",
+                default_timing,
             )
     
     assert results["sent"] == 1
@@ -93,7 +102,7 @@ async def test_t2h_eligibility_sends_message(mock_client_db, mock_client_config)
 
 
 @pytest.mark.asyncio
-async def test_t2h_already_sent_excluded(mock_client_db, mock_client_config):
+async def test_t2h_already_sent_excluded(mock_client_db, mock_client_config, default_timing):
     """
     Booking with followup_stage='2h_sent' should not be picked up by T+2h query.
     """
@@ -106,6 +115,7 @@ async def test_t2h_already_sent_excluded(mock_client_db, mock_client_config):
         mock_client_config,
         mock_client_db,
         "Hi! {service_type}",
+        default_timing,
     )
     
     assert results["sent"] == 0
@@ -113,7 +123,7 @@ async def test_t2h_already_sent_excluded(mock_client_db, mock_client_config):
 
 
 @pytest.mark.asyncio
-async def test_t24h_eligibility_sends_message(mock_client_db, mock_client_config):
+async def test_t24h_eligibility_sends_message(mock_client_db, mock_client_config, default_timing):
     """
     T+24h eligible booking (followup_stage='2h_sent', 25h since last followup, no reply)
     should send message and update followup_stage to '24h_sent'.
@@ -141,6 +151,7 @@ async def test_t24h_eligibility_sends_message(mock_client_db, mock_client_config
             mock_client_config,
             mock_client_db,
             "Hi again! {service_type} on {slot_date} ({slot_window})",
+            default_timing,
         )
     
     assert results["sent"] == 1
@@ -148,7 +159,7 @@ async def test_t24h_eligibility_sends_message(mock_client_db, mock_client_config
 
 
 @pytest.mark.asyncio
-async def test_t48h_abandon_no_message(mock_client_db):
+async def test_t48h_abandon_no_message(mock_client_db, default_timing):
     """
     T+48h eligible booking (followup_stage='24h_sent', 25h since last followup, no reply)
     should be abandoned with DB update only — NO message sent.
@@ -167,7 +178,7 @@ async def test_t48h_abandon_no_message(mock_client_db):
     ]
     
     with patch("engine.core.followup_scheduler.send_message") as mock_send:
-        abandoned = await process_t48h_abandonments("test-client", mock_client_db)
+        abandoned = await process_t48h_abandonments("test-client", mock_client_db, default_timing)
     
     assert abandoned == 1
     # Verify send_message was NEVER called
@@ -175,7 +186,7 @@ async def test_t48h_abandon_no_message(mock_client_db):
 
 
 @pytest.mark.asyncio
-async def test_customer_reply_stops_t2h_followup(mock_client_db, mock_client_config):
+async def test_customer_reply_stops_t2h_followup(mock_client_db, mock_client_config, default_timing):
     """
     If customer has sent inbound message after booking created_at,
     T+2h follow-up should be skipped.
@@ -202,6 +213,7 @@ async def test_customer_reply_stops_t2h_followup(mock_client_db, mock_client_con
             mock_client_config,
             mock_client_db,
             "Hi! {service_type}",
+            default_timing,
         )
     
     assert results["sent"] == 0
@@ -210,7 +222,7 @@ async def test_customer_reply_stops_t2h_followup(mock_client_db, mock_client_con
 
 
 @pytest.mark.asyncio
-async def test_escalated_customer_excluded(mock_client_db, mock_client_config):
+async def test_escalated_customer_excluded(mock_client_db, mock_client_config, default_timing):
     """
     If customer escalation_flag=True, T+2h follow-up should be skipped.
     """
@@ -235,6 +247,7 @@ async def test_escalated_customer_excluded(mock_client_db, mock_client_config):
             mock_client_config,
             mock_client_db,
             "Hi! {service_type}",
+            default_timing,
         )
     
     assert results["sent"] == 0
@@ -243,7 +256,7 @@ async def test_escalated_customer_excluded(mock_client_db, mock_client_config):
 
 
 @pytest.mark.asyncio
-async def test_opted_out_booking_excluded(mock_client_db, mock_client_config):
+async def test_opted_out_booking_excluded(mock_client_db, mock_client_config, default_timing):
     """
     Booking with followup_stage='opted_out' should not be picked up by any query.
     """
@@ -256,6 +269,7 @@ async def test_opted_out_booking_excluded(mock_client_db, mock_client_config):
         mock_client_config,
         mock_client_db,
         "Hi! {service_type}",
+        default_timing,
     )
     
     assert results["sent"] == 0
@@ -263,7 +277,7 @@ async def test_opted_out_booking_excluded(mock_client_db, mock_client_config):
 
 
 @pytest.mark.asyncio
-async def test_meta_api_failure_stage_not_updated(mock_client_db, mock_client_config):
+async def test_meta_api_failure_stage_not_updated(mock_client_db, mock_client_config, default_timing):
     """
     If send_message fails, followup_stage should NOT be updated
     and messages_sent_failed should be incremented.
@@ -297,6 +311,7 @@ async def test_meta_api_failure_stage_not_updated(mock_client_db, mock_client_co
                 mock_client_config,
                 mock_client_db,
                 "Hi! {service_type}",
+                default_timing,
             )
     
     assert results["sent"] == 0
@@ -308,7 +323,7 @@ async def test_meta_api_failure_stage_not_updated(mock_client_db, mock_client_co
 
 
 @pytest.mark.asyncio
-async def test_message_template_interpolation(mock_client_db, mock_client_config):
+async def test_message_template_interpolation(mock_client_db, mock_client_config, default_timing):
     """
     Message sent should contain correct service_type, slot_date, slot_window.
     """
@@ -340,6 +355,7 @@ async def test_message_template_interpolation(mock_client_db, mock_client_config
             mock_client_config,
             mock_client_db,
             template,
+            default_timing,
         )
         
         # Verify send_message was called with interpolated template
@@ -457,3 +473,66 @@ async def test_get_message_template():
     assert "{service_type}" in template
     assert "{slot_date}" in template
     assert "{slot_window}" in template
+
+
+@pytest.mark.asyncio
+async def test_load_followup_timing_config_from_db():
+    """
+    load_followup_timing_config should return per-client values when present in config table.
+    Override t2h_min_hours=1, t2h_max_hours=2 — the rest fall back to defaults.
+    """
+    mock_db = MagicMock()
+    mock_db.table = MagicMock(return_value=mock_db)
+    mock_db.select = MagicMock(return_value=mock_db)
+    mock_db.in_ = MagicMock(return_value=mock_db)
+    mock_db.execute = AsyncMock(return_value=MagicMock(data=[
+        {"key": "followup_t2h_min_hours", "value": "1"},
+        {"key": "followup_t2h_max_hours", "value": "2"},
+    ]))
+
+    timing = await load_followup_timing_config(mock_db, "test-client")
+
+    assert timing.t2h_min_hours == 1
+    assert timing.t2h_max_hours == 2
+    # Unset keys fall back to dataclass defaults
+    assert timing.t24h_after_hours == FollowupTimingConfig().t24h_after_hours
+    assert timing.t48h_after_hours == FollowupTimingConfig().t48h_after_hours
+
+
+@pytest.mark.asyncio
+async def test_load_followup_timing_config_defaults_when_db_empty():
+    """
+    load_followup_timing_config should return all defaults when config table has no timing rows.
+    """
+    mock_db = MagicMock()
+    mock_db.table = MagicMock(return_value=mock_db)
+    mock_db.select = MagicMock(return_value=mock_db)
+    mock_db.in_ = MagicMock(return_value=mock_db)
+    mock_db.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+    timing = await load_followup_timing_config(mock_db, "test-client")
+    defaults = FollowupTimingConfig()
+
+    assert timing.t2h_min_hours == defaults.t2h_min_hours
+    assert timing.t2h_max_hours == defaults.t2h_max_hours
+    assert timing.t24h_after_hours == defaults.t24h_after_hours
+    assert timing.t48h_after_hours == defaults.t48h_after_hours
+
+
+@pytest.mark.asyncio
+async def test_load_followup_timing_config_ignores_non_integer_values():
+    """
+    Non-integer values in config table should be ignored — default is used instead.
+    """
+    mock_db = MagicMock()
+    mock_db.table = MagicMock(return_value=mock_db)
+    mock_db.select = MagicMock(return_value=mock_db)
+    mock_db.in_ = MagicMock(return_value=mock_db)
+    mock_db.execute = AsyncMock(return_value=MagicMock(data=[
+        {"key": "followup_t2h_min_hours", "value": "not-a-number"},
+    ]))
+
+    timing = await load_followup_timing_config(mock_db, "test-client")
+
+    # Bad value discarded — falls back to default
+    assert timing.t2h_min_hours == FollowupTimingConfig().t2h_min_hours

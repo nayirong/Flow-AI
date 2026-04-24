@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_alert_chat_id: str | None = None
 
+    # Scheduler
+    # How often the APScheduler job fires. Override with SCHEDULER_INTERVAL_MINUTES env var.
+    # Set to 1 in Railway for testing; leave at 60 for production.
+    scheduler_interval_minutes: int = 60
+
     # Logging
     log_level: str = "INFO"
     

@@ -8,6 +8,7 @@ bookings as abandoned.
 Slice 4 — Proactive follow-up automation.
 """
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -16,6 +17,84 @@ from engine.integrations.meta_whatsapp import send_message
 from engine.config.client_config import load_client_config
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FollowupTimingConfig:
+    """
+    Per-client configurable timing windows for the follow-up scheduler.
+
+    All values are in hours. Loaded from the per-client `config` table;
+    any missing key falls back to the default listed here.
+
+    Config table keys:
+        followup_t2h_min_hours   — hours after booking creation before first follow-up fires
+        followup_t2h_max_hours   — upper bound; bookings older than this skip to T+24h logic
+        followup_t24h_after_hours — hours since last_followup_sent_at before second follow-up
+        followup_t48h_after_hours — hours since last_followup_sent_at before abandon
+    """
+    t2h_min_hours: int = 2    # send first follow-up 2h after booking
+    t2h_max_hours: int = 24   # stop T+2h logic after 24h
+    t24h_after_hours: int = 22  # send second follow-up 22h after first
+    t48h_after_hours: int = 22  # abandon 22h after second follow-up
+
+
+async def load_followup_timing_config(client_db, client_id: str) -> FollowupTimingConfig:
+    """
+    Load follow-up timing windows from the per-client config table.
+
+    Reads integer values for each timing key. Any key that is missing or
+    non-integer falls back silently to the FollowupTimingConfig default.
+
+    Args:
+        client_db: Per-client Supabase AsyncClient
+        client_id: Client identifier (for logging only)
+
+    Returns:
+        FollowupTimingConfig with values from DB (or defaults)
+    """
+    timing_keys = [
+        "followup_t2h_min_hours",
+        "followup_t2h_max_hours",
+        "followup_t24h_after_hours",
+        "followup_t48h_after_hours",
+    ]
+    defaults = FollowupTimingConfig()
+    overrides: dict = {}
+
+    try:
+        result = await (
+            client_db.table("config")
+            .select("key, value")
+            .in_("key", timing_keys)
+            .execute()
+        )
+        for row in result.data or []:
+            try:
+                overrides[row["key"]] = int(row["value"])
+            except (ValueError, TypeError):
+                logger.warning(
+                    f"Client '{client_id}': config key '{row['key']}' "
+                    f"value '{row['value']}' is not an integer — using default"
+                )
+    except Exception as e:
+        logger.warning(
+            f"Client '{client_id}': failed to load timing config — using defaults. Error: {e}"
+        )
+
+    timing = FollowupTimingConfig(
+        t2h_min_hours=overrides.get("followup_t2h_min_hours", defaults.t2h_min_hours),
+        t2h_max_hours=overrides.get("followup_t2h_max_hours", defaults.t2h_max_hours),
+        t24h_after_hours=overrides.get("followup_t24h_after_hours", defaults.t24h_after_hours),
+        t48h_after_hours=overrides.get("followup_t48h_after_hours", defaults.t48h_after_hours),
+    )
+    logger.info(
+        f"Client '{client_id}' timing config: "
+        f"T+2h={timing.t2h_min_hours}h–{timing.t2h_max_hours}h, "
+        f"T+24h after {timing.t24h_after_hours}h, "
+        f"T+48h abandon after {timing.t48h_after_hours}h"
+    )
+    return timing
 
 
 async def run_followup_scheduler() -> None:
@@ -98,6 +177,9 @@ async def process_client_followups(client_id: str) -> None:
     bookings_abandoned = 0
     messages_sent_failed = 0
     
+    # Load per-client timing config
+    timing = await load_followup_timing_config(client_db, client_id)
+
     # Load message templates
     template_t2h = await get_message_template(client_db, "followup_message_t2h", client_id)
     template_t24h = await get_message_template(client_db, "followup_message_t24h", client_id)
@@ -105,7 +187,7 @@ async def process_client_followups(client_id: str) -> None:
     # Process T+2h follow-ups
     try:
         t2h_results = await process_t2h_followups(
-            client_id, client_config, client_db, template_t2h
+            client_id, client_config, client_db, template_t2h, timing
         )
         bookings_t2h = t2h_results["sent"]
         messages_sent_failed += t2h_results["failed"]
@@ -115,7 +197,7 @@ async def process_client_followups(client_id: str) -> None:
     # Process T+24h follow-ups
     try:
         t24h_results = await process_t24h_followups(
-            client_id, client_config, client_db, template_t24h
+            client_id, client_config, client_db, template_t24h, timing
         )
         bookings_t24h = t24h_results["sent"]
         messages_sent_failed += t24h_results["failed"]
@@ -124,7 +206,7 @@ async def process_client_followups(client_id: str) -> None:
     
     # Process T+48h abandonments
     try:
-        bookings_abandoned = await process_t48h_abandonments(client_id, client_db)
+        bookings_abandoned = await process_t48h_abandonments(client_id, client_db, timing)
     except Exception as e:
         logger.error(f"Error processing T+48h abandonments for client '{client_id}': {e}", exc_info=True)
     
@@ -190,25 +272,28 @@ async def process_t2h_followups(
     client_config,
     client_db,
     template: str,
+    timing: FollowupTimingConfig,
 ) -> Dict[str, int]:
     """
-    Process T+2h follow-ups (bookings created 2-24h ago, no customer reply).
-    
+    Process T+2h follow-ups (bookings created t2h_min_hours–t2h_max_hours ago, no customer reply).
+
+    Timing windows come from the per-client FollowupTimingConfig.
+
     Returns:
         dict with 'sent' and 'failed' counts
     """
     sent = 0
     failed = 0
     
-    # Query eligible bookings
-    query = """
+    # Query eligible bookings — interval values from per-client timing config
+    query = f"""
         SELECT 
             booking_id, phone_number, service_type, slot_date, slot_window, created_at
         FROM bookings
         WHERE booking_status = 'pending_confirmation'
           AND followup_stage IS NULL
-          AND created_at <= NOW() - INTERVAL '2 hours'
-          AND created_at > NOW() - INTERVAL '24 hours'
+          AND created_at <= NOW() - INTERVAL '{timing.t2h_min_hours} hours'
+          AND created_at > NOW() - INTERVAL '{timing.t2h_max_hours} hours'
     """
     
     try:
@@ -283,24 +368,27 @@ async def process_t24h_followups(
     client_config,
     client_db,
     template: str,
+    timing: FollowupTimingConfig,
 ) -> Dict[str, int]:
     """
-    Process T+24h follow-ups (bookings with 2h_sent stage, 22+ hours since last follow-up).
-    
+    Process T+24h follow-ups (bookings with 2h_sent stage, t24h_after_hours since last follow-up).
+
+    Timing windows come from the per-client FollowupTimingConfig.
+
     Returns:
         dict with 'sent' and 'failed' counts
     """
     sent = 0
     failed = 0
     
-    # Query eligible bookings
-    query = """
+    # Query eligible bookings — interval from per-client timing config
+    query = f"""
         SELECT 
             booking_id, phone_number, service_type, slot_date, slot_window, last_followup_sent_at
         FROM bookings
         WHERE booking_status = 'pending_confirmation'
           AND followup_stage = '2h_sent'
-          AND last_followup_sent_at <= NOW() - INTERVAL '22 hours'
+          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.t24h_after_hours} hours'
     """
     
     try:
@@ -370,23 +458,25 @@ async def process_t24h_followups(
     return {"sent": sent, "failed": failed}
 
 
-async def process_t48h_abandonments(client_id: str, client_db) -> int:
+async def process_t48h_abandonments(client_id: str, client_db, timing: FollowupTimingConfig) -> int:
     """
-    Process T+48h abandonments (bookings with 24h_sent stage, 22+ hours since last follow-up).
-    
+    Process T+48h abandonments (bookings with 24h_sent stage, t48h_after_hours since last follow-up).
+
+    No message is sent — DB update only. Timing window from per-client FollowupTimingConfig.
+
     Returns:
         Count of bookings abandoned
     """
     abandoned = 0
     
-    # Query eligible bookings
-    query = """
+    # Query eligible bookings — interval from per-client timing config
+    query = f"""
         SELECT 
             booking_id, phone_number, last_followup_sent_at
         FROM bookings
         WHERE booking_status = 'pending_confirmation'
           AND followup_stage = '24h_sent'
-          AND last_followup_sent_at <= NOW() - INTERVAL '22 hours'
+          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.t48h_after_hours} hours'
     """
     
     try:
