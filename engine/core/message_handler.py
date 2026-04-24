@@ -96,6 +96,25 @@ _AFFIRMATIVE_CONFIRMATION_PATTERNS = [
     "yes please",
     "ok can",
     "can",
+    # Natural-language confirmations (Singapore English + common variants)
+    "i confirm",
+    "confirm it",
+    "confirm lah",
+    "confirm lor",
+    "ok confirm",
+    "yes confirm",
+    "yes i confirm",
+    "i want to confirm",
+    "i would like to confirm",
+    "i d like to confirm",
+    "confirm the booking",
+    "i confirm the booking",
+    "let s confirm",
+    "lets confirm",
+    "yep confirm",
+    "ok lah confirm",
+    "please confirm",
+    "confirm please",
 ]
 
 
@@ -480,6 +499,7 @@ async def handle_inbound_message(
                         client_id=client_id,
                         anthropic_api_key=client_config.anthropic_api_key,
                         openai_api_key=client_config.openai_api_key,
+                        pending_booking_id=pending_booking["booking_id"] if pending_booking else None,
                     )
             except Exception as e:
                 logger.error(

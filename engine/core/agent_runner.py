@@ -353,6 +353,7 @@ async def run_agent(
     client_id: str = "",
     anthropic_api_key: str = "",
     openai_api_key: str = "",
+    pending_booking_id: str | None = None,
 ) -> str:
     """
     Run the Claude tool-use loop and return the final text response.
@@ -388,6 +389,12 @@ async def run_agent(
     booking_write_succeeded = False
     _booking_reprompt_used = False
     escalation_called = False  # True if escalate_to_human ran successfully this turn
+
+    # Second guardrail: tracks confirm_booking when a pending booking exists.
+    # Prevents the agent from fabricating a booking confirmation in text without
+    # actually calling confirm_booking (the zero-tool, iter=1 hallucination case).
+    confirm_booking_succeeded = False
+    _confirm_reprompt_used = False
 
     # Build initial messages list: history + current inbound
     messages: list[dict] = list(conversation_history) + [
@@ -517,8 +524,50 @@ async def run_agent(
                 f"chars={len(final_text)})"
             )
 
-            # Guardrail: only active when check_calendar_availability succeeded this
-            # invocation (i.e., we are in the booking confirmation phase). Prevents
+            # Second guardrail: pending booking exists but confirm_booking not called.
+            # Catches the case where the agent fabricates a booking confirmation in
+            # text (iter=1, zero tools) without calling confirm_booking.
+            if pending_booking_id and not confirm_booking_succeeded and _contains_booking_confirmation(final_text):
+                if not _confirm_reprompt_used:
+                    _confirm_reprompt_used = True
+                    logger.warning(
+                        "PENDING BOOKING GUARDRAIL: agent confirmed booking %s in text without "
+                        "calling confirm_booking (iter=%d, client_id=%s)",
+                        pending_booking_id, iteration + 1, client_id,
+                    )
+                    await log_incident(
+                        provider="agent_guardrail",
+                        error_type="pending_booking_guardrail_reprompt",
+                        error_message=f"agent fabricated confirm for {pending_booking_id} without calling confirm_booking",
+                        client_id=client_id,
+                    )
+                    messages.append({"role": "assistant", "content": [{"type": "text", "text": final_text}]})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"[SYSTEM CORRECTION] You described a booking confirmation without calling confirm_booking. "
+                            f"You MUST call confirm_booking with booking_id='{pending_booking_id}' now. "
+                            "Do NOT describe or imply the booking is confirmed in text. "
+                            "Call the tool — the tool creates the calendar event and updates the database."
+                        ),
+                    })
+                    continue
+                else:
+                    logger.warning(
+                        "PENDING BOOKING GUARDRAIL FIRED: confirm_booking not called after re-prompt "
+                        "(pending_booking_id=%s, client_id=%s)",
+                        pending_booking_id, client_id,
+                    )
+                    await log_incident(
+                        provider="agent_guardrail",
+                        error_type="pending_booking_guardrail_fired",
+                        error_message=f"confirm_booking not called after re-prompt for {pending_booking_id}",
+                        client_id=client_id,
+                    )
+                    return _BOOKING_GUARDRAIL_FALLBACK
+
+            # First guardrail: only active when check_calendar_availability succeeded this
+            # invocation (i.e., we are in the write_booking phase). Prevents
             # false positives from casual confirmation language in non-booking turns.
             if calendar_check_succeeded and not booking_write_succeeded:
                 guardrail_action, guardrail_detail = _apply_booking_guardrail(
@@ -624,6 +673,18 @@ async def run_agent(
                             result_data = json.loads(tool_result["content"])
                             if result_data.get("status") == "escalated":
                                 escalation_called = True
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                    if getattr(block, "name", None) == "confirm_booking":
+                        try:
+                            result_data = json.loads(tool_result["content"])
+                            if result_data.get("status") == "confirmed" and "error" not in result_data:
+                                confirm_booking_succeeded = True
+                                logger.info(
+                                    "confirm_booking succeeded (booking_id=%s)",
+                                    result_data.get("booking_id", pending_booking_id),
+                                )
                         except (json.JSONDecodeError, TypeError):
                             pass
 
