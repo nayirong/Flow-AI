@@ -265,16 +265,21 @@ async def test_current_inbound_removed_from_history_before_agent(
 @patch("engine.core.message_handler.load_client_config", new_callable=AsyncMock)
 @patch("engine.core.message_handler._get_latest_pending_booking", new_callable=AsyncMock)
 @patch("engine.core.message_handler.build_tool_dispatch")
-async def test_affirmative_pending_confirmation_bypasses_llm(
+async def test_affirmative_pending_confirmation_uses_agent_with_phase_b_tools(
     mock_build_tool_dispatch,
     mock_get_pending_booking,
     mock_load_config, mock_get_db, mock_send,
     mock_build_system, mock_fetch_history, mock_run_agent,
     mock_client_config_obj,
 ):
-    """A plain yes/confirm reply should confirm the latest pending booking directly."""
+    """
+    When a pending booking exists, the LLM is invoked with Phase B tools
+    (confirm_booking, get_customer_bookings, escalate_to_human) — write_booking
+    and check_calendar_availability are excluded so the LLM cannot create duplicates.
+    The affirmative bypass is gone; intent classification is the LLM's job.
+    """
     mock_load_config.return_value = mock_client_config_obj
-    mock_get_pending_booking.return_value = {
+    pending = {
         "booking_id": "HA-20260427-ABCD",
         "service_type": "General Servicing",
         "slot_date": "2026-04-27",
@@ -282,12 +287,10 @@ async def test_affirmative_pending_confirmation_bypasses_llm(
         "address": "123 Test Street",
         "postal_code": "123456",
     }
-    mock_confirm = AsyncMock(return_value={
-        "status": "confirmed",
-        "booking_id": "HA-20260427-ABCD",
-        "message": "✅ Your booking is confirmed! Reference: HA-20260427-ABCD.",
-    })
-    mock_build_tool_dispatch.return_value = {"confirm_booking": mock_confirm}
+    mock_get_pending_booking.return_value = pending
+    mock_build_system.return_value = "System message"
+    mock_fetch_history.return_value = []
+    mock_run_agent.return_value = "✅ Your booking is confirmed! Reference: HA-20260427-ABCD."
 
     existing = {"phone_number": "6591234567", "escalation_flag": False}
     db, _ = _make_db(customer_row=existing)
@@ -297,8 +300,19 @@ async def test_affirmative_pending_confirmation_bypasses_llm(
         **{**_PARAMS, "message_text": "yes"}
     )
 
-    mock_confirm.assert_awaited_once_with(booking_id="HA-20260427-ABCD")
-    mock_run_agent.assert_not_awaited()
+    # LLM is invoked (not bypassed)
+    mock_run_agent.assert_awaited_once()
+
+    # pending_booking_id is passed through so the guardrail in agent_runner can activate
+    call_kwargs = mock_run_agent.await_args.kwargs
+    assert call_kwargs["pending_booking_id"] == "HA-20260427-ABCD"
+
+    # Phase B: only confirm_booking, get_customer_bookings, escalate_to_human in tool list
+    tool_names = [t["name"] for t in call_kwargs["tool_definitions"]]
+    assert "confirm_booking" in tool_names
+    assert "write_booking" not in tool_names
+    assert "check_calendar_availability" not in tool_names
+
     mock_send.assert_awaited_once_with(
         mock_client_config_obj,
         _PARAMS["phone_number"],

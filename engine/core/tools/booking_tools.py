@@ -142,42 +142,6 @@ async def write_booking(
             "The agent must collect address from the customer before calling this tool."
         )
 
-    # ── Guard: block duplicate pending booking ────────────────────────────────
-    # If a pending_confirmation booking already exists for this customer, do NOT
-    # create another one. Return an error directing the agent to call confirm_booking
-    # on the existing booking instead. This prevents duplicate rows when the LLM
-    # mistakenly calls write_booking again during the confirmation phase.
-    try:
-        existing = await (
-            db.table("bookings")
-            .select("booking_id")
-            .eq("phone_number", phone_number)
-            .eq("booking_status", "pending_confirmation")
-            .limit(1)
-            .execute()
-        )
-        if existing.data:
-            existing_id = existing.data[0]["booking_id"]
-            logger.warning(
-                "write_booking: pending booking %s already exists for %s — blocking duplicate",
-                existing_id,
-                phone_number,
-            )
-            return {
-                "booking_id": existing_id,
-                "status": "error",
-                "error": "pending_booking_exists",
-                "message": (
-                    f"A pending booking (Reference: {existing_id}) already exists for this customer "
-                    "and is awaiting confirmation. Do NOT create a new booking. "
-                    f"Call confirm_booking with booking_id='{existing_id}' to finalise it, "
-                    "or inform the customer their booking is pending their confirmation."
-                ),
-            }
-    except Exception as check_err:
-        logger.warning("write_booking: pending-duplicate check failed (non-fatal): %s", check_err)
-        # Non-fatal — proceed with normal write if the guard itself errors.
-
     booking_id = _generate_booking_id(slot_date)
 
     # ── INSERT booking row with pending_confirmation status ───────────────────────

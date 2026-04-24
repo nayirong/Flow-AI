@@ -23,7 +23,7 @@ from engine.integrations.meta_whatsapp import send_message
 from engine.integrations.google_sheets import sync_customer_to_sheets
 from engine.core.context_builder import build_system_message, fetch_conversation_history
 from engine.core.agent_runner import run_agent
-from engine.core.tools import TOOL_DEFINITIONS, build_tool_dispatch
+from engine.core.tools import build_tool_definitions, build_tool_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -78,52 +78,6 @@ OPT_OUT_REPLY = (
     "Understood! We won't send any more follow-up messages about your upcoming appointment. "
     "If you'd like to book a service or need help, feel free to message us anytime."
 )
-
-_AFFIRMATIVE_CONFIRMATION_PATTERNS = [
-    "yes",
-    "y",
-    "ok",
-    "okay",
-    "confirm",
-    "confirmed",
-    "sure",
-    "correct",
-    "yep",
-    "yup",
-    "go ahead",
-    "sounds good",
-    "looks good",
-    "yes please",
-    "ok can",
-    "can",
-    # Natural-language confirmations (Singapore English + common variants)
-    "i confirm",
-    "confirm it",
-    "confirm lah",
-    "confirm lor",
-    "ok confirm",
-    "yes confirm",
-    "yes i confirm",
-    "i want to confirm",
-    "i would like to confirm",
-    "i d like to confirm",
-    "confirm the booking",
-    "i confirm the booking",
-    "let s confirm",
-    "lets confirm",
-    "yep confirm",
-    "ok lah confirm",
-    "please confirm",
-    "confirm please",
-]
-
-
-def _is_affirmative_confirmation(message_text: str) -> bool:
-    """Return True when the inbound is a plain confirmation to a pending summary."""
-    normalised = re.sub(r"[^a-z0-9\s]+", " ", (message_text or "").lower())
-    normalised = " ".join(normalised.split())
-    return normalised in _AFFIRMATIVE_CONFIRMATION_PATTERNS
-
 
 def _is_opt_out_keyword(message_text: str) -> bool:
     """Return True if the message matches a recognised opt-out keyword."""
@@ -458,53 +412,50 @@ async def handle_inbound_message(
                 tool_dispatch = build_tool_dispatch(db, client_config, phone_number)
                 pending_booking = await _get_latest_pending_booking(db, phone_number)
 
-                if pending_booking and _is_affirmative_confirmation(message_text):
-                    logger.info(
-                        "Affirmative confirmation detected for pending booking %s — bypassing LLM",
-                        pending_booking["booking_id"],
+                # Phase-based tool selection:
+                #   Phase A (no pending): check_calendar, write_booking, get_bookings, escalate
+                #   Phase B (pending exists): confirm_booking, get_bookings, escalate
+                # write_booking is excluded in Phase B — the LLM structurally cannot
+                # create a duplicate booking. confirm_booking is excluded in Phase A —
+                # the LLM cannot confirm something that doesn't exist yet.
+                tool_definitions = build_tool_definitions(pending_booking)
+
+                system_message = await build_system_message(db)
+                known_name = (customer_row or {}).get("customer_name") if customer_row else None
+                if known_name:
+                    system_message += (
+                        f"\n\nCURRENT CUSTOMER:\n"
+                        f"Name: {known_name}\n"
+                        f"Use this name when calling write_booking — do NOT ask the customer "
+                        f"for their name again unless they say it has changed.\n"
                     )
-                    confirm_result = await tool_dispatch["confirm_booking"](
-                        booking_id=pending_booking["booking_id"]
+                if pending_booking:
+                    system_message += (
+                        "\n\nPENDING BOOKING AWAITING CONFIRMATION:\n"
+                        f"Reference: {pending_booking['booking_id']}\n"
+                        f"Service: {pending_booking['service_type']}\n"
+                        f"Date: {pending_booking['slot_date']}\n"
+                        f"Time: {pending_booking['slot_window']}\n"
+                        f"Address: {pending_booking['address']}, Singapore {pending_booking['postal_code']}\n"
+                        "\nThe customer has already provided all booking details. "
+                        "Your only available booking action is confirm_booking — use the exact booking_id above. "
+                        "If the customer is affirming (yes/ok/confirm/sure/go ahead), call confirm_booking immediately. "
+                        "If the customer asks a question, answer it first. "
+                        "Do NOT ask the customer to repeat their details.\n"
                     )
-                    agent_reply = confirm_result.get("message") or FALLBACK_REPLY
-                else:
-                    system_message = await build_system_message(db)
-                    known_name = (customer_row or {}).get("customer_name") if customer_row else None
-                    if known_name:
-                        system_message += (
-                            f"\n\nCURRENT CUSTOMER:\n"
-                            f"Name: {known_name}\n"
-                            f"Use this name when calling write_booking — do NOT ask the customer "
-                            f"for their name again unless they say it has changed.\n"
-                        )
-                    if pending_booking:
-                        system_message += (
-                            "\n\nLATEST PENDING BOOKING:\n"
-                            f"Reference: {pending_booking['booking_id']}\n"
-                            f"Service: {pending_booking['service_type']}\n"
-                            f"Date: {pending_booking['slot_date']}\n"
-                            f"Time: {pending_booking['slot_window']}\n"
-                            f"Address: {pending_booking['address']}, Singapore {pending_booking['postal_code']}\n"
-                            "\nRULES FOR THIS PENDING BOOKING:\n"
-                            "1. ONLY call confirm_booking if the customer's ENTIRE message is a short, unambiguous affirmation "
-                            "   ('yes', 'ok', 'confirm', 'sure', 'go ahead') with no other questions or requests.\n"
-                            "2. If the customer asks ANY question — even about their own bookings — answer the question. "
-                            "   Do NOT call confirm_booking in response to a question.\n"
-                            "3. Do NOT call write_booking again. A pending booking already exists for this customer.\n"
-                        )
-                    history = await fetch_conversation_history(db, phone_number)
-                    history = _remove_current_inbound_from_history(history, message_text)
-                    agent_reply = await run_agent(
-                        system_message=system_message,
-                        conversation_history=history,
-                        current_message=message_text,
-                        tool_definitions=TOOL_DEFINITIONS,
-                        tool_dispatch=tool_dispatch,
-                        client_id=client_id,
-                        anthropic_api_key=client_config.anthropic_api_key,
-                        openai_api_key=client_config.openai_api_key,
-                        pending_booking_id=pending_booking["booking_id"] if pending_booking else None,
-                    )
+                history = await fetch_conversation_history(db, phone_number)
+                history = _remove_current_inbound_from_history(history, message_text)
+                agent_reply = await run_agent(
+                    system_message=system_message,
+                    conversation_history=history,
+                    current_message=message_text,
+                    tool_definitions=tool_definitions,
+                    tool_dispatch=tool_dispatch,
+                    client_id=client_id,
+                    anthropic_api_key=client_config.anthropic_api_key,
+                    openai_api_key=client_config.openai_api_key,
+                    pending_booking_id=pending_booking["booking_id"] if pending_booking else None,
+                )
             except Exception as e:
                 logger.error(
                     f"Agent error for {phone_number} (client: {client_id}): {e}",

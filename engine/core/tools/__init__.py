@@ -12,7 +12,7 @@ Usage in message_handler.py:
     reply = await run_agent(..., tool_definitions=TOOL_DEFINITIONS, tool_dispatch=tool_dispatch)
 """
 
-from engine.core.tools.definitions import TOOL_DEFINITIONS
+from engine.core.tools.definitions import TOOL_DEFINITIONS, build_tool_definitions
 from engine.core.tools.calendar_tools import check_calendar_availability
 from engine.core.tools.booking_tools import write_booking, get_customer_bookings
 from engine.core.tools.confirm_booking_tool import confirm_booking
@@ -104,4 +104,4 @@ def build_tool_dispatch(db, client_config, phone_number: str) -> dict:
 # build_tool_dispatch() instead.
 TOOL_DISPATCH: dict = {}
 
-__all__ = ["TOOL_DEFINITIONS", "TOOL_DISPATCH", "build_tool_dispatch"]
+__all__ = ["TOOL_DEFINITIONS", "build_tool_definitions", "TOOL_DISPATCH", "build_tool_dispatch"]

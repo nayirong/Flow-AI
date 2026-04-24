@@ -43,7 +43,8 @@ _BOOKING_GUARDRAIL_FALLBACK = (
     "A member of our team will follow up with you today to confirm your appointment."
 )
 _BOOKING_CONFIRMATION_KEYWORDS = [
-    # Explicit new-confirmation phrases — appear when agent finalises a booking
+    # Explicit new-confirmation phrases — only appear when agent finalises a booking.
+    # Deliberately narrow to avoid false positives when customer asks about existing bookings.
     "your booking is confirmed",
     "your booking has been confirmed",
     "booking is confirmed",
@@ -55,11 +56,8 @@ _BOOKING_CONFIRMATION_KEYWORDS = [
     "successfully confirmed",
     "we've confirmed your booking",
     "we have confirmed your booking",
-    # Summary / wrap-up language used specifically after confirmation
     "here's your booking summary",
     "here is your booking summary",
-    "appointment summary",
-    # Strong future-tense signals that the agent has finalised a slot
     "we'll see you",
     "we will see you",
     "see you on",
