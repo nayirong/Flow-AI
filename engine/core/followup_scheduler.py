@@ -28,15 +28,15 @@ class FollowupTimingConfig:
     any missing key falls back to the default listed here.
 
     Config table keys:
-        followup_t2h_min_hours   — hours after booking creation before first follow-up fires
-        followup_t2h_max_hours   — upper bound; bookings older than this skip to T+24h logic
-        followup_t24h_after_hours — hours since last_followup_sent_at before second follow-up
-        followup_t48h_after_hours — hours since last_followup_sent_at before abandon
+        followup_first_min_hours   — hours after booking creation before first follow-up fires
+        followup_first_max_hours   — upper bound; bookings older than this move to second follow-up logic
+        followup_second_after_hours — hours since last_followup_sent_at before second follow-up fires
+        followup_abandon_after_hours — hours since last_followup_sent_at before booking is abandoned
     """
-    t2h_min_hours: int = 2    # send first follow-up 2h after booking
-    t2h_max_hours: int = 24   # stop T+2h logic after 24h
-    t24h_after_hours: int = 22  # send second follow-up 22h after first
-    t48h_after_hours: int = 22  # abandon 22h after second follow-up
+    first_min_hours: int = 2    # send first follow-up 2h after booking
+    first_max_hours: int = 24   # stop first follow-up logic after 24h
+    second_after_hours: int = 22  # send second follow-up 22h after first
+    abandon_after_hours: int = 22  # abandon 22h after second follow-up
 
 
 async def load_followup_timing_config(client_db, client_id: str) -> FollowupTimingConfig:
@@ -54,10 +54,10 @@ async def load_followup_timing_config(client_db, client_id: str) -> FollowupTimi
         FollowupTimingConfig with values from DB (or defaults)
     """
     timing_keys = [
-        "followup_t2h_min_hours",
-        "followup_t2h_max_hours",
-        "followup_t24h_after_hours",
-        "followup_t48h_after_hours",
+        "followup_first_min_hours",
+        "followup_first_max_hours",
+        "followup_second_after_hours",
+        "followup_abandon_after_hours",
     ]
     defaults = FollowupTimingConfig()
     overrides: dict = {}
@@ -83,16 +83,16 @@ async def load_followup_timing_config(client_db, client_id: str) -> FollowupTimi
         )
 
     timing = FollowupTimingConfig(
-        t2h_min_hours=overrides.get("followup_t2h_min_hours", defaults.t2h_min_hours),
-        t2h_max_hours=overrides.get("followup_t2h_max_hours", defaults.t2h_max_hours),
-        t24h_after_hours=overrides.get("followup_t24h_after_hours", defaults.t24h_after_hours),
-        t48h_after_hours=overrides.get("followup_t48h_after_hours", defaults.t48h_after_hours),
+        first_min_hours=overrides.get("followup_first_min_hours", defaults.first_min_hours),
+        first_max_hours=overrides.get("followup_first_max_hours", defaults.first_max_hours),
+        second_after_hours=overrides.get("followup_second_after_hours", defaults.second_after_hours),
+        abandon_after_hours=overrides.get("followup_abandon_after_hours", defaults.abandon_after_hours),
     )
     logger.info(
         f"Client '{client_id}' timing config: "
-        f"T+2h={timing.t2h_min_hours}h–{timing.t2h_max_hours}h, "
-        f"T+24h after {timing.t24h_after_hours}h, "
-        f"T+48h abandon after {timing.t48h_after_hours}h"
+        f"first follow-up={timing.first_min_hours}h–{timing.first_max_hours}h, "
+        f"second follow-up after {timing.second_after_hours}h, "
+        f"abandon after {timing.abandon_after_hours}h"
     )
     return timing
 
@@ -292,8 +292,8 @@ async def process_t2h_followups(
         FROM bookings
         WHERE booking_status = 'pending_confirmation'
           AND followup_stage IS NULL
-          AND created_at <= NOW() - INTERVAL '{timing.t2h_min_hours} hours'
-          AND created_at > NOW() - INTERVAL '{timing.t2h_max_hours} hours'
+          AND created_at <= NOW() - INTERVAL '{timing.first_min_hours} hours'
+          AND created_at > NOW() - INTERVAL '{timing.first_max_hours} hours'
     """
     
     try:
@@ -388,7 +388,7 @@ async def process_t24h_followups(
         FROM bookings
         WHERE booking_status = 'pending_confirmation'
           AND followup_stage = '2h_sent'
-          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.t24h_after_hours} hours'
+          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.second_after_hours} hours'
     """
     
     try:
@@ -476,7 +476,7 @@ async def process_t48h_abandonments(client_id: str, client_db, timing: FollowupT
         FROM bookings
         WHERE booking_status = 'pending_confirmation'
           AND followup_stage = '24h_sent'
-          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.t48h_after_hours} hours'
+          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.abandon_after_hours} hours'
     """
     
     try:

@@ -486,17 +486,17 @@ async def test_load_followup_timing_config_from_db():
     mock_db.select = MagicMock(return_value=mock_db)
     mock_db.in_ = MagicMock(return_value=mock_db)
     mock_db.execute = AsyncMock(return_value=MagicMock(data=[
-        {"key": "followup_t2h_min_hours", "value": "1"},
-        {"key": "followup_t2h_max_hours", "value": "2"},
+        {"key": "followup_first_min_hours", "value": "1"},
+        {"key": "followup_first_max_hours", "value": "2"},
     ]))
 
     timing = await load_followup_timing_config(mock_db, "test-client")
 
-    assert timing.t2h_min_hours == 1
-    assert timing.t2h_max_hours == 2
+    assert timing.first_min_hours == 1
+    assert timing.first_max_hours == 2
     # Unset keys fall back to dataclass defaults
-    assert timing.t24h_after_hours == FollowupTimingConfig().t24h_after_hours
-    assert timing.t48h_after_hours == FollowupTimingConfig().t48h_after_hours
+    assert timing.second_after_hours == FollowupTimingConfig().second_after_hours
+    assert timing.abandon_after_hours == FollowupTimingConfig().abandon_after_hours
 
 
 @pytest.mark.asyncio
@@ -513,10 +513,10 @@ async def test_load_followup_timing_config_defaults_when_db_empty():
     timing = await load_followup_timing_config(mock_db, "test-client")
     defaults = FollowupTimingConfig()
 
-    assert timing.t2h_min_hours == defaults.t2h_min_hours
-    assert timing.t2h_max_hours == defaults.t2h_max_hours
-    assert timing.t24h_after_hours == defaults.t24h_after_hours
-    assert timing.t48h_after_hours == defaults.t48h_after_hours
+    assert timing.first_min_hours == defaults.first_min_hours
+    assert timing.first_max_hours == defaults.first_max_hours
+    assert timing.second_after_hours == defaults.second_after_hours
+    assert timing.abandon_after_hours == defaults.abandon_after_hours
 
 
 @pytest.mark.asyncio
@@ -529,10 +529,10 @@ async def test_load_followup_timing_config_ignores_non_integer_values():
     mock_db.select = MagicMock(return_value=mock_db)
     mock_db.in_ = MagicMock(return_value=mock_db)
     mock_db.execute = AsyncMock(return_value=MagicMock(data=[
-        {"key": "followup_t2h_min_hours", "value": "not-a-number"},
+        {"key": "followup_first_min_hours", "value": "not-a-number"},
     ]))
 
     timing = await load_followup_timing_config(mock_db, "test-client")
 
     # Bad value discarded — falls back to default
-    assert timing.t2h_min_hours == FollowupTimingConfig().t2h_min_hours
+    assert timing.first_min_hours == FollowupTimingConfig().first_min_hours
