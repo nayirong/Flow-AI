@@ -485,8 +485,12 @@ async def handle_inbound_message(
                             f"Date: {pending_booking['slot_date']}\n"
                             f"Time: {pending_booking['slot_window']}\n"
                             f"Address: {pending_booking['address']}, Singapore {pending_booking['postal_code']}\n"
-                            "If the customer is affirming this pending booking summary, call confirm_booking "
-                            "with this exact booking_id. Do NOT call write_booking again for the same pending booking.\n"
+                            "\nRULES FOR THIS PENDING BOOKING:\n"
+                            "1. ONLY call confirm_booking if the customer's ENTIRE message is a short, unambiguous affirmation "
+                            "   ('yes', 'ok', 'confirm', 'sure', 'go ahead') with no other questions or requests.\n"
+                            "2. If the customer asks ANY question — even about their own bookings — answer the question. "
+                            "   Do NOT call confirm_booking in response to a question.\n"
+                            "3. Do NOT call write_booking again. A pending booking already exists for this customer.\n"
                         )
                     history = await fetch_conversation_history(db, phone_number)
                     history = _remove_current_inbound_from_history(history, message_text)

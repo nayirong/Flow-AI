@@ -43,25 +43,28 @@ _BOOKING_GUARDRAIL_FALLBACK = (
     "A member of our team will follow up with you today to confirm your appointment."
 )
 _BOOKING_CONFIRMATION_KEYWORDS = [
-    "confirmed",
-    "booked",
-    "booking reference",
-    "booking id",
-    "booking summary",
-    "appointment summary",
+    # Explicit new-confirmation phrases — appear when agent finalises a booking
+    "your booking is confirmed",
+    "your booking has been confirmed",
+    "booking is confirmed",
+    "booking confirmed",
+    "your appointment is confirmed",
+    "your appointment has been confirmed",
+    "appointment is confirmed",
+    "has been scheduled",
+    "successfully confirmed",
+    "we've confirmed your booking",
+    "we have confirmed your booking",
+    # Summary / wrap-up language used specifically after confirmation
     "here's your booking summary",
     "here is your booking summary",
-    "reply yes to confirm",
-    "reply *yes* to confirm",
-    "confirm your appointment",
-    "confirm the appointment",
-    "confirm your booking",
-    "all set",
-    "appointment is set",
-    "see you on",
-    "has been scheduled",
+    "appointment summary",
+    # Strong future-tense signals that the agent has finalised a slot
     "we'll see you",
     "we will see you",
+    "see you on",
+    "all set",
+    "appointment is set",
 ]
 
 
@@ -564,6 +567,17 @@ async def run_agent(
                         error_message=f"confirm_booking not called after re-prompt for {pending_booking_id}",
                         client_id=client_id,
                     )
+                    try:
+                        await tool_dispatch["escalate_to_human"](
+                            reason=(
+                                f"Pending booking guardrail fired — agent could not confirm booking "
+                                f"{pending_booking_id}. Customer needs manual follow-up."
+                            )
+                        )
+                    except Exception as esc_err:
+                        logger.error(
+                            "Failed to escalate after pending booking guardrail fire: %s", esc_err
+                        )
                     return _BOOKING_GUARDRAIL_FALLBACK
 
             # First guardrail: only active when check_calendar_availability succeeded this
