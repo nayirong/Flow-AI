@@ -9,7 +9,7 @@ Slice 4 — Proactive follow-up automation.
 """
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
 from engine.integrations.supabase_client import get_client_db, get_shared_db
@@ -285,25 +285,27 @@ async def process_t2h_followups(
     sent = 0
     failed = 0
     
-    # Query eligible bookings — interval values from per-client timing config
-    query = f"""
-        SELECT 
-            booking_id, phone_number, service_type, slot_date, slot_window, created_at
-        FROM bookings
-        WHERE booking_status = 'pending_confirmation'
-          AND followup_stage IS NULL
-          AND created_at <= NOW() - INTERVAL '{timing.first_min_hours} hours'
-          AND created_at > NOW() - INTERVAL '{timing.first_max_hours} hours'
-    """
-    
+    # Query eligible bookings using PostgREST client with Python-computed timestamps
+    now = datetime.now(timezone.utc)
+    min_cutoff = (now - timedelta(hours=timing.first_min_hours)).isoformat()
+    max_cutoff = (now - timedelta(hours=timing.first_max_hours)).isoformat()
+
     try:
-        result = await client_db.rpc("execute_sql", {"query": query}).execute()
+        result = await (
+            client_db.table("bookings")
+            .select("booking_id, phone_number, service_type, slot_date, slot_window, created_at")
+            .eq("booking_status", "pending_confirmation")
+            .is_("followup_stage", "null")
+            .lte("created_at", min_cutoff)
+            .gt("created_at", max_cutoff)
+            .execute()
+        )
         bookings = result.data if result.data else []
     except Exception as e:
-        logger.error(f"Failed to query T+2h bookings for client '{client_id}': {e}")
+        logger.error(f"Failed to query first follow-up bookings for client '{client_id}': {e}")
         return {"sent": 0, "failed": 0}
     
-    logger.info(f"Found {len(bookings)} candidate T+2h bookings for client '{client_id}'")
+    logger.info(f"Found {len(bookings)} candidate first follow-up bookings for client '{client_id}'")
     
     # Process each booking
     for booking in bookings:
@@ -381,24 +383,25 @@ async def process_t24h_followups(
     sent = 0
     failed = 0
     
-    # Query eligible bookings — interval from per-client timing config
-    query = f"""
-        SELECT 
-            booking_id, phone_number, service_type, slot_date, slot_window, last_followup_sent_at
-        FROM bookings
-        WHERE booking_status = 'pending_confirmation'
-          AND followup_stage = '2h_sent'
-          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.second_after_hours} hours'
-    """
-    
+    # Query eligible bookings using PostgREST client with Python-computed timestamp
+    now = datetime.now(timezone.utc)
+    second_cutoff = (now - timedelta(hours=timing.second_after_hours)).isoformat()
+
     try:
-        result = await client_db.rpc("execute_sql", {"query": query}).execute()
+        result = await (
+            client_db.table("bookings")
+            .select("booking_id, phone_number, service_type, slot_date, slot_window, last_followup_sent_at")
+            .eq("booking_status", "pending_confirmation")
+            .eq("followup_stage", "2h_sent")
+            .lte("last_followup_sent_at", second_cutoff)
+            .execute()
+        )
         bookings = result.data if result.data else []
     except Exception as e:
-        logger.error(f"Failed to query T+24h bookings for client '{client_id}': {e}")
+        logger.error(f"Failed to query second follow-up bookings for client '{client_id}': {e}")
         return {"sent": 0, "failed": 0}
     
-    logger.info(f"Found {len(bookings)} candidate T+24h bookings for client '{client_id}'")
+    logger.info(f"Found {len(bookings)} candidate second follow-up bookings for client '{client_id}'")
     
     # Process each booking
     for booking in bookings:
@@ -469,24 +472,25 @@ async def process_t48h_abandonments(client_id: str, client_db, timing: FollowupT
     """
     abandoned = 0
     
-    # Query eligible bookings — interval from per-client timing config
-    query = f"""
-        SELECT 
-            booking_id, phone_number, last_followup_sent_at
-        FROM bookings
-        WHERE booking_status = 'pending_confirmation'
-          AND followup_stage = '24h_sent'
-          AND last_followup_sent_at <= NOW() - INTERVAL '{timing.abandon_after_hours} hours'
-    """
-    
+    # Query eligible bookings using PostgREST client with Python-computed timestamp
+    now = datetime.now(timezone.utc)
+    abandon_cutoff = (now - timedelta(hours=timing.abandon_after_hours)).isoformat()
+
     try:
-        result = await client_db.rpc("execute_sql", {"query": query}).execute()
+        result = await (
+            client_db.table("bookings")
+            .select("booking_id, phone_number, last_followup_sent_at")
+            .eq("booking_status", "pending_confirmation")
+            .eq("followup_stage", "24h_sent")
+            .lte("last_followup_sent_at", abandon_cutoff)
+            .execute()
+        )
         bookings = result.data if result.data else []
     except Exception as e:
-        logger.error(f"Failed to query T+48h bookings for client '{client_id}': {e}")
+        logger.error(f"Failed to query abandon bookings for client '{client_id}': {e}")
         return 0
     
-    logger.info(f"Found {len(bookings)} candidate T+48h abandon bookings for client '{client_id}'")
+    logger.info(f"Found {len(bookings)} candidate abandon bookings for client '{client_id}'")
     
     # Process each booking
     for booking in bookings:
