@@ -10,16 +10,42 @@ CRITICAL RULE: POST route MUST always return 200 OK to Meta.
 Meta will disable the webhook if it receives 4xx/5xx responses.
 """
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, BackgroundTasks, Query, Response
 from fastapi.responses import PlainTextResponse
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from engine.config.client_config import load_client_config, ClientNotFoundError
 from engine.core.message_handler import handle_inbound_message
+from engine.core.followup_scheduler import run_followup_scheduler
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager — starts/stops APScheduler.
+    
+    Starts the follow-up scheduler on startup, shuts it down on shutdown.
+    """
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        run_followup_scheduler,
+        trigger="interval",
+        minutes=60,
+        id="followup_scheduler",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logger.info("Follow-up scheduler started (interval: 60 min)")
+    yield
+    scheduler.shutdown(wait=False)
+    logger.info("Follow-up scheduler stopped")
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 # ---------------------------------------------------------------------------
