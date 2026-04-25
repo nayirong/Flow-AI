@@ -119,12 +119,10 @@ async def test_check_availability_google_error_returns_unavailable(mock_check):
 # ── write_booking ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-@patch("engine.integrations.google_calendar.create_booking_event", new_callable=AsyncMock)
-async def test_write_booking_inserts_row_and_updates_customer(mock_create_event):
-    """write_booking creates calendar event, inserts booking row, updates customer."""
+async def test_write_booking_inserts_row_and_updates_customer():
+    """write_booking records pending booking row and updates customer_name. No calendar event created."""
     from engine.core.tools.booking_tools import write_booking
 
-    mock_create_event.return_value = "cal_event_xyz"
     db = _make_db()
     cfg = _make_client_config(has_calendar=True)
 
@@ -141,8 +139,7 @@ async def test_write_booking_inserts_row_and_updates_customer(mock_create_event)
         slot_window="AM",
     )
 
-    assert result["status"] == "Confirmed"
-    assert result["calendar_event_id"] == "cal_event_xyz"
+    assert result["status"] == "pending_confirmation"
     assert result["booking_id"].startswith("HA-20260501-")
     assert len(result["booking_id"]) == len("HA-20260501-XXXX")
 
@@ -196,15 +193,13 @@ def _make_db_for_booking_step3(total_bookings: int):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.google_calendar.create_booking_event", new_callable=AsyncMock)
-async def test_write_booking_updates_customer_name_and_syncs_sheets(mock_create_event):
+async def test_write_booking_updates_customer_name_and_syncs_sheets():
     """
-    write_booking Step 3: UPDATE sets customer_name; re-fetch picks up
-    trigger-updated total_bookings for Sheets sync.
+    write_booking: UPDATE sets customer_name only (no booking_count field).
+    Returns pending_confirmation status.
     """
     from engine.core.tools.booking_tools import write_booking
 
-    mock_create_event.return_value = "cal_event_new"
     db = _make_db_for_booking_step3(total_bookings=1)
     cfg = _make_client_config(has_calendar=True)
 
@@ -221,7 +216,7 @@ async def test_write_booking_updates_customer_name_and_syncs_sheets(mock_create_
         slot_window="AM",
     )
 
-    assert result["status"] == "Confirmed"
+    assert result["status"] == "pending_confirmation"
 
     # UPDATE must only set customer_name — no booking_count field
     update_call_args = db._update_chain.update.call_args
@@ -233,15 +228,12 @@ async def test_write_booking_updates_customer_name_and_syncs_sheets(mock_create_
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.google_calendar.create_booking_event", new_callable=AsyncMock)
-async def test_write_booking_refetches_customer_after_update(mock_create_event):
+async def test_write_booking_refetches_customer_after_update():
     """
-    write_booking Step 3: after updating customer_name, a SELECT * re-fetch
-    must be issued so the Sheets sync receives the trigger-updated total_bookings.
+    write_booking: after updating customer_name, customers table is touched.
     """
     from engine.core.tools.booking_tools import write_booking
 
-    mock_create_event.return_value = "cal_event_return"
     db = _make_db_for_booking_step3(total_bookings=2)
     cfg = _make_client_config(has_calendar=True)
 
@@ -258,38 +250,35 @@ async def test_write_booking_refetches_customer_after_update(mock_create_event):
         slot_window="PM",
     )
 
-    assert result["status"] == "Confirmed"
-    # The refetch chain's execute must have been awaited
-    db._update_chain.eq.assert_called()
+    assert result["status"] == "pending_confirmation"
+    # The customers table must have been touched (UPDATE customer_name)
+    table_names = [call[0][0] for call in db.table.call_args_list]
+    assert "customers" in table_names
 
 
 @pytest.mark.asyncio
-async def test_write_booking_no_calendar_raises_and_alerts():
-    """No calendar config → raises RuntimeError and alerts human agent (never writes to DB)."""
+async def test_write_booking_no_calendar_succeeds():
+    """No calendar config → write_booking still records the pending booking (calendar used in confirm_booking only)."""
     from engine.core.tools.booking_tools import write_booking
-    from unittest.mock import AsyncMock, patch
 
     db = _make_db()
     cfg = _make_client_config(has_calendar=False)
 
-    with patch("engine.core.tools.booking_tools._alert_booking_failure", new_callable=AsyncMock) as mock_alert:
-        with pytest.raises(RuntimeError, match="Google Calendar not configured"):
-            await write_booking(
-                db=db,
-                client_config=cfg,
-                phone_number="6591234567",
-                customer_name="Bob Lim",
-                service_type="Chemical Wash",
-                unit_count="1",
-                address="5 Tampines Ave",
-                postal_code="520005",
-                slot_date="2026-05-02",
-                slot_window="PM",
-            )
+    result = await write_booking(
+        db=db,
+        client_config=cfg,
+        phone_number="6591234567",
+        customer_name="Bob Lim",
+        service_type="Chemical Wash",
+        unit_count="1",
+        address="5 Tampines Ave",
+        postal_code="520005",
+        slot_date="2026-05-02",
+        slot_window="PM",
+    )
 
-    mock_alert.assert_called_once()
-    # DB must NOT have been touched
-    db.table.assert_not_called()
+    assert result["status"] == "pending_confirmation"
+    assert result["booking_id"].startswith("HA-20260502-")
 
 
 def test_generate_booking_id_format():
@@ -437,7 +426,7 @@ async def test_escalate_db_failure_does_not_crash(mock_send):
 # ── build_tool_dispatch ───────────────────────────────────────────────────────
 
 def test_build_tool_dispatch_registers_all_tools():
-    """build_tool_dispatch returns all 4 expected tool names."""
+    """build_tool_dispatch returns all 5 expected tool names."""
     from engine.core.tools import build_tool_dispatch
 
     db = _make_db()
@@ -448,20 +437,22 @@ def test_build_tool_dispatch_registers_all_tools():
     assert set(dispatch.keys()) == {
         "check_calendar_availability",
         "write_booking",
+        "confirm_booking",
         "get_customer_bookings",
         "escalate_to_human",
     }
 
 
 def test_tool_definitions_count():
-    """TOOL_DEFINITIONS exports exactly 4 tool dicts."""
+    """TOOL_DEFINITIONS exports exactly 5 tool dicts."""
     from engine.core.tools import TOOL_DEFINITIONS
 
-    assert len(TOOL_DEFINITIONS) == 4
+    assert len(TOOL_DEFINITIONS) == 5
     names = {t["name"] for t in TOOL_DEFINITIONS}
     assert names == {
         "check_calendar_availability",
         "write_booking",
+        "confirm_booking",
         "get_customer_bookings",
         "escalate_to_human",
     }

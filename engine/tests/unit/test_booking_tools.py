@@ -137,8 +137,8 @@ async def test_write_booking_requires_address(mock_db, mock_client_config):
 
 
 @pytest.mark.asyncio
-async def test_write_booking_no_customers_update(mock_db, mock_client_config):
-    """write_booking must NOT update the customers table."""
+async def test_write_booking_updates_customer_name(mock_db, mock_client_config):
+    """write_booking must update customers.customer_name (non-fatal UPDATE)."""
     from engine.core.tools.booking_tools import write_booking
 
     with patch("engine.core.tools.booking_tools.sync_booking_to_sheets", new=AsyncMock()):
@@ -149,9 +149,9 @@ async def test_write_booking_no_customers_update(mock_db, mock_client_config):
             **BOOKING_KWARGS,
         )
 
-    # Verify customers table was NOT updated
-    for call in mock_db.table.call_args_list:
-        assert call[0][0] != "customers", "write_booking must not write to customers table"
+    # Verify customers table was touched for customer_name UPDATE
+    table_names = [call[0][0] for call in mock_db.table.call_args_list]
+    assert "customers" in table_names, "write_booking must update customers.customer_name"
 
 
 @pytest.mark.asyncio

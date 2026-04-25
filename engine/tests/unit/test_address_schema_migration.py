@@ -53,21 +53,14 @@ def _make_split_db():
     bookings_chain.insert.return_value = bookings_chain
     bookings_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
 
-    # customers_chain must support both SELECT and UPDATE paths.
-    # - SELECT path: .select().eq().limit().execute() → data=[{"booking_count": 0}]
-    # - UPDATE path: .update().eq().execute()         → data=[]
-    # MagicMock chaining: all intermediate calls return the same object.
+    # customers_chain supports UPDATE path only.
+    # write_booking updates customer_name (non-fatal) after bookings INSERT.
     customers_chain = MagicMock()
     customers_chain.select.return_value = customers_chain
     customers_chain.update.return_value = customers_chain
     customers_chain.eq.return_value = customers_chain
     customers_chain.limit.return_value = customers_chain
-    customers_chain.execute = AsyncMock(
-        side_effect=[
-            MagicMock(data=[{"booking_count": 0}]),  # SELECT call
-            MagicMock(data=[]),                       # UPDATE call
-        ]
-    )
+    customers_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
 
     db = MagicMock()
     db.table.side_effect = (
@@ -207,7 +200,7 @@ async def test_tc05_regression_booking_row_core_fields_present(mock_create_event
     assert inserted_row["unit_count"] == "2"
     assert inserted_row["slot_date"] == "2026-05-01"
     assert inserted_row["slot_window"] == "AM"
-    assert inserted_row["booking_status"] == "Confirmed"
+    assert inserted_row["booking_status"] == "pending_confirmation"
 
 
 # ── TC-06: Regression — customer_update still contains customer_name ───────────
@@ -284,25 +277,29 @@ async def test_tc07_repeat_customer_each_booking_gets_own_address(mock_create_ev
 
 @pytest.mark.asyncio
 @patch(
-    "engine.integrations.google_calendar.create_booking_event",
-    new_callable=AsyncMock,
-    side_effect=RuntimeError("Google Calendar 404"),
-)
-@patch(
     "engine.core.tools.booking_tools._alert_booking_failure",
     new_callable=AsyncMock,
 )
-async def test_tc08_calendar_exception_triggers_alert(mock_alert, mock_create_event):
-    """TC-08: When calendar raises, _alert_booking_failure is still called."""
+async def test_tc08_db_insert_failure_triggers_alert(mock_alert):
+    """TC-08: When bookings INSERT raises, _alert_booking_failure is called with address."""
     from engine.core.tools.booking_tools import write_booking
 
-    db, _, _ = _make_split_db()
+    # bookings INSERT fails; customers UPDATE is never reached
+    bookings_chain = MagicMock()
+    bookings_chain.insert.return_value = bookings_chain
+    bookings_chain.execute = AsyncMock(side_effect=RuntimeError("DB down"))
+
+    db = MagicMock()
+    db.table.return_value = bookings_chain
     cfg = _make_client_config()
 
     with pytest.raises(RuntimeError):
         await write_booking(db=db, client_config=cfg, **_base_booking_kwargs())
 
     mock_alert.assert_awaited_once()
+    call_kwargs = mock_alert.call_args.kwargs
+    assert call_kwargs["address"] == "10 Jurong East Street 21"
+    assert call_kwargs["postal_code"] == "609607"
 
 
 # ── TC-09: Schema contract — definitions.py required array includes address ────
@@ -360,32 +357,27 @@ async def test_tc10_get_customer_bookings_tolerates_none_address():
 
 
 @pytest.mark.asyncio
-@patch(
-    "engine.core.tools.booking_tools._alert_booking_failure",
-    new_callable=AsyncMock,
-)
-async def test_tc11_alert_receives_address_on_no_calendar_early_exit(mock_alert):
-    """TC-11: When calendar is not configured (early exit), _alert_booking_failure
-    is called with the correct address value."""
+async def test_tc11_write_booking_succeeds_without_calendar_config():
+    """TC-11: write_booking records a pending booking even when calendar is not configured.
+    Calendar is only used in confirm_booking — write_booking should not raise."""
     from engine.core.tools.booking_tools import write_booking
 
-    db, _, _ = _make_split_db()
+    db, bookings_chain, _ = _make_split_db()
     cfg = _make_client_config(has_calendar=False)
 
-    with pytest.raises(RuntimeError):
-        await write_booking(
-            db=db,
-            client_config=cfg,
-            **_base_booking_kwargs(
-                address="10 Jurong East Street 21",
-                postal_code="609607",
-            ),
-        )
+    result = await write_booking(
+        db=db,
+        client_config=cfg,
+        **_base_booking_kwargs(
+            address="10 Jurong East Street 21",
+            postal_code="609607",
+        ),
+    )
 
-    mock_alert.assert_awaited_once()
-    call_kwargs = mock_alert.call_args.kwargs
-    assert call_kwargs["address"] == "10 Jurong East Street 21"
-    assert call_kwargs["postal_code"] == "609607"
+    assert result["status"] == "pending_confirmation"
+    inserted_row = bookings_chain.insert.call_args[0][0]
+    assert inserted_row["address"] == "10 Jurong East Street 21"
+    assert inserted_row["postal_code"] == "609607"
 
 
 # ── TC-12: Non-fatal customer UPDATE failure ───────────────────────────────────
@@ -407,19 +399,14 @@ async def test_tc12_customer_update_failure_is_non_fatal(mock_create_event):
     bookings_chain.insert.return_value = bookings_chain
     bookings_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
 
-    # Step 3 now does: SELECT booking_count first, then UPDATE.
-    # The SELECT must succeed (returns current count) so the code reaches the UPDATE.
-    # The UPDATE raises — that is the failure we are testing.
+    # customers UPDATE raises — this is what we test (non-fatal).
     customers_chain = MagicMock()
     customers_chain.select.return_value = customers_chain
     customers_chain.update.return_value = customers_chain
     customers_chain.eq.return_value = customers_chain
     customers_chain.limit.return_value = customers_chain
     customers_chain.execute = AsyncMock(
-        side_effect=[
-            MagicMock(data=[{"booking_count": 0}]),  # SELECT succeeds
-            Exception("DB write failed"),             # UPDATE fails — this is what we test
-        ]
+        side_effect=Exception("DB write failed"),  # UPDATE fails — this is what we test
     )
 
     db = MagicMock()
@@ -431,5 +418,5 @@ async def test_tc12_customer_update_failure_is_non_fatal(mock_create_event):
 
     result = await write_booking(db=db, client_config=cfg, **_base_booking_kwargs())
 
-    assert result["status"] == "Confirmed"
+    assert result["status"] == "pending_confirmation"
     assert "booking_id" in result

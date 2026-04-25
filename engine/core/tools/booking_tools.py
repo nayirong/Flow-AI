@@ -197,6 +197,18 @@ async def write_booking(
         )
         raise
 
+    # ── UPDATE customers.customer_name (non-fatal) ────────────────────────────
+    # Keep the customer record's display name in sync with what the agent collected.
+    # Failure here does not abort the booking — booking row already committed.
+    try:
+        await db.table("customers").update({
+            "customer_name": customer_name,
+        }).eq("phone_number", phone_number).execute()
+    except Exception as cust_err:
+        logger.warning(
+            f"Non-fatal: failed to update customer_name for {phone_number}: {cust_err}"
+        )
+
     logger.info(
         f"Pending booking {booking_id} recorded for {phone_number} "
         f"({slot_date} {slot_window}, {service_type})"
