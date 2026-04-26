@@ -25,7 +25,14 @@
       "Bash(black --check engine/core/tools/booking_tools.py engine/tests/unit/test_address_schema_migration.py)",
       "Bash(black engine/core/tools/booking_tools.py engine/tests/unit/test_address_schema_migration.py)",
       "Bash(python3 -m pytest engine/tests/unit/test_address_schema_migration.py engine/tests/unit/ -v)",
-      "Bash(python3 -m pytest tests/unit/ -v)"
+      "Bash(python3 -m pytest tests/unit/ -v)",
+      "Bash(git worktree *)",
+      "Bash(git branch *)",
+      "Edit(~/.claude/skills/post-mortem/**)",
+      "Bash(python -m pytest engine/tests/unit/test_context_builder.py engine/tests/unit/test_tools.py engine/tests/unit/test_booking_tools.py -x -q)",
+      "Bash(python3 -m pytest engine/tests/unit/test_context_builder.py engine/tests/unit/test_tools.py engine/tests/unit/test_booking_tools.py -x -q)",
+      "Bash(python3 -m pytest engine/tests/unit/test_message_handler.py -x -q)",
+      "Bash(python3 -m pytest engine/tests/unit/test_message_handler.py -q)"
     ],
     "additionalDirectories": [
       "/Users/nayirong/Desktop/Personal/Professional Service/Flow AI/.claude/skills",

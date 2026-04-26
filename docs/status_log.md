@@ -1,7 +1,7 @@
 # Flow AI — Project Status Log
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-23
+> Last Updated: 2026-04-24
 
 ---
 
@@ -88,6 +88,7 @@
 
 | Date | Phase | Description | Status |
 |------|-------|-------------|--------|
+| 2026-04-24 | Client Report | HeyAircon client-facing status report generated. Content drafted by chief-of-staff; file write delegated to `@sdet-engineer` → `docs/client-reports/heyaircon_status_2026-04-24.md`. | Complete |
 | 2026-04-24 | Post-mortem | Slice 2 booking confirmation + Railway deployment isolation + escalation reset fallback + Sheets row key fix — 4 rework clusters, 20 commits | Complete |
 
 ---

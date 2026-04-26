@@ -19,26 +19,45 @@ from engine.core.tools.confirm_booking_tool import confirm_booking
 from engine.core.tools.escalation_tool import escalate_to_human
 
 
-def build_tool_dispatch(db, client_config, phone_number: str) -> dict:
+def build_tool_dispatch(db, client_config, phone_number: str, lead_time_days: int = 2) -> dict:
     """
     Build the tool dispatch table for a single inbound message.
 
-    Injects db, client_config, and phone_number into each tool via closure so
-    the agent_runner can call tools with only Claude-supplied args (no internals).
+    Injects db, client_config, phone_number, and lead_time_days into each tool
+    via closure so the agent_runner can call tools with only Claude-supplied args.
 
     Args:
-        db:            Supabase async client for the client's DB.
-        client_config: ClientConfig for the active client.
-        phone_number:  Inbound customer phone number.
-
-    Returns:
-        dict mapping tool name → async callable.
+        db:             Supabase async client for the client's DB.
+        client_config:  ClientConfig for the active client.
+        phone_number:   Inbound customer phone number.
+        lead_time_days: Minimum days in advance a booking must be made. Enforced
+                        as a hard guard in check_calendar_availability and write_booking.
     """
+    from datetime import date as _date
+
+    def _is_within_lead_time(slot_date_str: str) -> bool:
+        try:
+            slot = _date.fromisoformat(slot_date_str)
+            delta = (slot - _date.today()).days
+            return delta < lead_time_days
+        except ValueError:
+            return False
 
     async def _check_calendar_availability(
         date: str,
         timezone: str = "Asia/Singapore",
     ) -> dict:
+        if _is_within_lead_time(date):
+            return {
+                "date": date,
+                "am_available": False,
+                "pm_available": False,
+                "error": "lead_time_violation",
+                "message": (
+                    f"Bookings must be made at least {lead_time_days} days in advance. "
+                    f"{date} is too soon. Please ask the customer to choose a later date."
+                ),
+            }
         return await check_calendar_availability(
             client_config=client_config,
             date=date,
@@ -56,6 +75,14 @@ def build_tool_dispatch(db, client_config, phone_number: str) -> dict:
         aircon_brand: str | None = None,
         notes: str | None = None,
     ) -> dict:
+        if _is_within_lead_time(slot_date):
+            return {
+                "error": "lead_time_violation",
+                "message": (
+                    f"Booking rejected: {slot_date} is within the {lead_time_days}-day minimum "
+                    f"notice period. Inform the customer and ask them to choose a later date."
+                ),
+            }
         return await write_booking(
             db=db,
             client_config=client_config,

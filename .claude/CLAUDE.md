@@ -117,6 +117,7 @@ clients/
     product/               # PRD, persona, knowledge base
     website/               # static HTML site
     invoices/              # generated PDF invoices (output of finance/invoice_generator.py)
+    reports/               # client-facing status reports (YYYY-MM-DD named markdown files)
 
 finance/
   invoice_generator.py     # reusable PDF invoice generator (CLI + importable module)
@@ -143,6 +144,8 @@ Product/docs/              ← platform-level PRDs and standards (rename to plat
 | Client onboarding process | `.flow/onboarding.md` |
 | Generating a client invoice | Run `/generate-invoice` skill; script at `finance/invoice_generator.py` |
 | Client invoice history | `clients/{client_id}/invoices/` |
+| Generating a client status report | Use chief-of-staff to draft; write to `clients/{client_id}/reports/` with filename `{client_id}_status_YYYY-MM-DD.md` |
+| Client status report history | `clients/{client_id}/reports/` |
 | Understanding which code file handles what | `docs/architecture/code_map.md` |
 
 ---

@@ -866,13 +866,15 @@ async def test_opt_out_keyword_marks_booking_opted_out(
 @patch("engine.core.message_handler.run_agent", new_callable=AsyncMock)
 @patch("engine.core.message_handler.fetch_conversation_history", new_callable=AsyncMock)
 @patch("engine.core.message_handler.build_system_message", new_callable=AsyncMock)
+@patch("engine.core.message_handler.fetch_lead_days", new_callable=AsyncMock)
 async def test_opt_out_no_active_booking_falls_through_to_agent(
-    mock_build_system, mock_fetch_history, mock_run_agent,
+    mock_fetch_lead_days, mock_build_system, mock_fetch_history, mock_run_agent,
     mock_load_config, mock_get_db, mock_send, mock_client_config_obj
 ):
     """'stop' with no active pending booking → passes through to agent."""
     mock_load_config.return_value = mock_client_config_obj
     mock_build_system.return_value = "System message"
+    mock_fetch_lead_days.return_value = 2
     mock_fetch_history.return_value = []
     mock_run_agent.return_value = "Agent reply"
 

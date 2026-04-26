@@ -258,6 +258,28 @@ async def build_system_message(db: Any) -> str:
     return system_message
 
 
+async def fetch_lead_days(db: Any) -> int:
+    """
+    Fetch the booking_lead_time_days config value from Supabase.
+
+    Returns the integer lead time (default 2 if missing or invalid).
+    Used by build_tool_dispatch to enforce the lead time rule in tool closures.
+    """
+    result = (
+        await db.table("config")
+        .select("value")
+        .eq("key", "booking_lead_time_days")
+        .execute()
+    )
+    rows = result.data or []
+    if rows:
+        try:
+            return int(rows[0]["value"])
+        except (ValueError, KeyError):
+            pass
+    return 2
+
+
 async def fetch_conversation_history(
     db: Any,
     phone_number: str,

@@ -14,6 +14,7 @@ This directory contains test plans, acceptance criteria, and worktree management
 - `features/google_sheets_sync.md` — Google Sheets post-write sync (customer + booking data visibility layer) — **READY FOR IMPLEMENTATION** (April 2026)
 - `features/address_schema_migration.md` — Address fields migration: `customers` → `bookings` (Phase 2 code change in `write_booking()`) — **READY FOR IMPLEMENTATION** (April 2026)
 - `features/telegram_alerts.md` — Internal Telegram Alert Bot: real-time Tier 1/2 failure alerts to internal team chat — **READY FOR IMPLEMENTATION** (April 2026)
+- `features/llm_digest.md` — LLM Observability: Fallback Warning Telegram alert + Daily LLM digest scheduler — **READY FOR IMPLEMENTATION** (April 2026)
 
 ### Source documents (read before producing test plan)
 - `clients/hey-aircon/plans/mvp_scope.md` — acceptance criteria per component (§What's NOT Built Yet, §Supabase schemas)

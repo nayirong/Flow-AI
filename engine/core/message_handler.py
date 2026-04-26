@@ -21,7 +21,7 @@ from engine.config.client_config import load_client_config, ClientNotFoundError
 from engine.integrations.supabase_client import get_client_db
 from engine.integrations.meta_whatsapp import send_message
 from engine.integrations.google_sheets import sync_customer_to_sheets
-from engine.core.context_builder import build_system_message, fetch_conversation_history
+from engine.core.context_builder import build_system_message, fetch_conversation_history, fetch_lead_days
 from engine.core.agent_runner import run_agent
 from engine.core.tools import build_tool_definitions, build_tool_dispatch
 
@@ -409,8 +409,11 @@ async def handle_inbound_message(
         )
         async with _get_customer_lock(phone_number):
             try:
-                tool_dispatch = build_tool_dispatch(db, client_config, phone_number)
-                pending_booking = await _get_latest_pending_booking(db, phone_number)
+                lead_days, pending_booking = await asyncio.gather(
+                    fetch_lead_days(db),
+                    _get_latest_pending_booking(db, phone_number),
+                )
+                tool_dispatch = build_tool_dispatch(db, client_config, phone_number, lead_days)
 
                 # Phase-based tool selection:
                 #   Phase A (no pending): check_calendar, write_booking, get_bookings, escalate
