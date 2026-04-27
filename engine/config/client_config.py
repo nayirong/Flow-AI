@@ -87,6 +87,13 @@ async def load_client_config(client_id: str) -> ClientConfig:
     if client_id in _cache:
         config, expiry = _cache[client_id]
         if now < expiry:
+            # Defensive assertion: cache key must match stored client_id.
+            # A mismatch indicates a cache corruption bug — fail loudly rather
+            # than silently serving one client's config to another.
+            assert config.client_id == client_id, (
+                f"Cache key mismatch: expected '{client_id}', got '{config.client_id}'. "
+                "Cache is corrupted — this is a bug, not a client error."
+            )
             return config
     
     # 2. Query shared Supabase clients table
