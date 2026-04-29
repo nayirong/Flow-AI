@@ -2,7 +2,7 @@
 
 **Feature Owner:** `@product-manager`  
 **Date Created:** 2026-04-28  
-**Last Updated:** 2026-04-28  
+**Last Updated:** 2026-04-29  
 **Status:** Draft — Awaiting Architect Review  
 **Priority:** High (Strategic Phase)  
 **Phase:** Phase 1 MVP (Flow AI website only)  
@@ -13,7 +13,7 @@
 
 - **Subject:** Website visitors on `getflowai.co` (and future client websites in Phase 2) who need to ask questions or book services
 - **Problem/Threat:** WhatsApp-only contact creates friction — requires app install, phone number sharing, Meta platform dependency; website visitors need immediate, low-friction engagement without leaving the browser
-- **Confirmation:** Solution provides the subject (website visitors) with a web-native chat interface that eliminates WhatsApp friction — not a replacement for WhatsApp (that channel stays active), not an admin tool, not a cross-channel identity bridge (Phase 3)
+- **Confirmation:** Solution provides the subject (website visitors) with a web-native chat interface that eliminates WhatsApp friction — not a replacement for WhatsApp (that channel stays active), not an admin tool. Cross-channel identity linking (widget visitor ↔ existing WhatsApp customer) is in Phase 1 scope via optional phone capture in the pre-chat form.
 
 ---
 
@@ -58,7 +58,8 @@ The chat widget provides a **web-native entry point** with:
 |-----------|-------------|
 | **Single-client deployment** | Flow AI website (`getflowai.co`) only — widget serves Kai (Flow AI's lead qualification agent) |
 | **Same agent engine** | Reuses `context_builder.py`, `agent_runner.py`, tools, knowledge base — zero duplication |
-| **Optional pre-chat form** | Name + email capture (skip-able) — visitor can remain anonymous |
+| **Optional pre-chat form** | Name, email, and phone capture (all skip-able) — visitor can remain anonymous |
+| **Cross-channel identity linking** | When visitor submits phone number in pre-chat form, engine queries per-client `customers` table by `phone_number`; if match found, `visitors.customer_id` FK set — linking widget session to existing WhatsApp history |
 | **Text-only conversation** | Visitor types messages, agent replies with text — no file upload, no images |
 | **Session-based identity** | `session_id` (UUID) stored in browser `localStorage` — replaces `phone_number` as conversation identifier |
 | **Escalation gate** | Same `escalation_flag` check as WhatsApp — escalated visitors see holding message, agent does not run |
@@ -73,7 +74,7 @@ The chat widget provides a **web-native entry point** with:
 | Feature | Deferred To | Rationale |
 |---------|-------------|-----------|
 | Multi-client widget | Phase 2 | Pilot on Flow AI site first — validate UX, performance, and data isolation before rolling out to paying clients |
-| Identity linking (widget → WhatsApp) | Phase 3 | Requires cross-channel session tracking and customer matching — complex; not needed for single-channel conversations |
+
 | Cross-channel escalation (widget → WhatsApp handoff) | Phase 3 | Requires real-time message bridge and human agent reply routing — Phase 1 escalations are WhatsApp-alert-only |
 | File/image upload | Phase 2 | Requires file storage (S3/Supabase Storage), virus scanning, and multimodal LLM support |
 | Typing indicators | Phase 2 | Requires WebSocket persistent connection — Phase 1 uses HTTP polling |
@@ -87,7 +88,7 @@ The chat widget provides a **web-native entry point** with:
 |-------|-------|--------------|
 | **Phase 1** | Flow AI website only; single-client pilot; HTTP polling; anonymous sessions | Validate widget UX, backend architecture, and PDPA compliance |
 | **Phase 2** | Multi-client rollout (HeyAircon, 5+ clients); embed on client websites; identity linking (email/phone capture) | Prove multi-tenant data isolation; enable client self-service widget config |
-| **Phase 3** | Cross-channel escalation (widget → WhatsApp handoff); WebSocket upgrade; file upload | Unified customer experience across WhatsApp and widget channels |
+| **Phase 3** | Cross-channel escalation (widget → WhatsApp handoff); WebSocket upgrade; file upload | Unified real-time cross-channel experience (identity linking already done in Phase 1) |
 
 ---
 
@@ -120,7 +121,8 @@ The chat widget provides a **web-native entry point** with:
 - [ ] Notice text is visible without scrolling (fixed at bottom of form)
 - [ ] Name and Email fields accept text input (Email validated as valid email format)
 - [ ] Submit button disabled until Email is valid format
-- [ ] On submit: form data saved to `visitors` table (new table) with `session_id`, `name`, `email`, `created_at`
+- [ ] On submit: form data saved to `visitors` table (new table) with `session_id`, `name`, `email`, `phone`, `created_at`
+- [ ] If phone submitted: engine queries `customers` table for matching `phone_number`; if found, `visitors.customer_id` FK set
 - [ ] Agent's first message includes visitor's name: "Hi {name}, I'm Kai..."
 - [ ] Conversation continues identically to anonymous flow after form submission
 
@@ -212,11 +214,12 @@ The chat widget provides a **web-native entry point** with:
 
 **FR-003: Pre-Chat Form**
 - Displays on first widget open if visitor has no `session_id` in `localStorage`
-- Fields: Name (text, optional), Email (text, email format validation, optional)
+- Fields: Name (text, optional), Email (text, email format validation, optional), Phone (text, optional, E.164 format hint)
 - PDPA data collection notice displayed above Submit button (exact text in §6)
 - Buttons: "Submit" (saves form → starts conversation), "Skip" (bypasses form → starts anonymous conversation)
 - If visitor clicks "Skip": `session_id` generated, no `visitors` row created, conversation starts immediately
-- If visitor submits form: `session_id` generated, `visitors` row inserted with `name`, `email`, `session_id`, conversation starts
+- If visitor submits form: `session_id` generated, `visitors` row inserted with `name`, `email`, `phone`, `session_id`, conversation starts
+- If phone submitted: query `customers` table (`SELECT id, phone_number, customer_name FROM customers WHERE phone_number = $1`); if match found, set `visitors.customer_id = customers.id`
 
 **FR-004: Message Rendering**
 - Visitor messages: right-aligned, blue bubble background, white text
@@ -334,6 +337,8 @@ CREATE TABLE visitors (
     client_id TEXT NOT NULL REFERENCES clients(client_id),
     name TEXT,
     email TEXT,
+    phone TEXT,                          -- Optional; used for cross-channel identity lookup
+    customer_id BIGINT REFERENCES customers(id) ON DELETE SET NULL,  -- Set if phone matched existing WhatsApp customer
     escalation_flag BOOLEAN NOT NULL DEFAULT FALSE,
     escalation_reason TEXT,
     escalated_at TIMESTAMPTZ,
@@ -342,7 +347,15 @@ CREATE TABLE visitors (
 
 CREATE UNIQUE INDEX idx_visitors_session_id ON visitors(session_id);
 CREATE INDEX idx_visitors_email ON visitors(email) WHERE email IS NOT NULL;
+CREATE INDEX idx_visitors_customer_id ON visitors(customer_id) WHERE customer_id IS NOT NULL;
 ```
+
+**Cross-channel identity matching logic (inline at form submission):**
+1. Visitor submits pre-chat form with phone number (e.g. `+6591234567`)
+2. `POST /chat/{client_id}/session` (or a new `POST /chat/{client_id}/identify` endpoint) queries the **per-client** Supabase: `SELECT id FROM customers WHERE phone_number = $1 LIMIT 1`
+3. If a row is found: `UPDATE visitors SET customer_id = $1 WHERE session_id = $2`
+4. `context_builder.py` checks `visitors.customer_id`; if set, fetches prior `interactions_log` rows for that `phone_number` and prepends to conversation context (recent history, last 5 exchanges)
+5. Agent is aware the visitor is a known customer — adjusts response accordingly (no need to re-ask for service history)
 
 **FR-017: Schema Changes to `interactions_log`**
 
@@ -488,9 +501,9 @@ ALTER TABLE clients ADD COLUMN widget_session_ttl_minutes INTEGER NOT NULL DEFAU
 
 ```
 By submitting this form, you consent to Flow AI collecting your name, email, 
-and messages to respond to your inquiry. We retain this data for 12 months. 
-You may request deletion anytime by emailing privacy@flowai.co. For details, 
-see our Privacy Policy.
+phone number, and messages to respond to your inquiry. We retain this data 
+for 12 months. You may request deletion anytime by emailing privacy@flowai.co. 
+For details, see our Privacy Policy.
 ```
 
 **Privacy Policy link:** `https://getflowai.co/privacy` (must be live before widget goes live)
@@ -634,6 +647,8 @@ Before Phase 2 (multi-client rollout) can begin, the following must be verified:
 - [ ] Zero cross-client data leakage confirmed by test suite (simulate widget for `client_id=flow-ai` and `client_id=test-client`, verify no `session_id` collision, no conversation history cross-contamination)
 - [ ] CORS origin validation working: embed widget on `test-domain.com` (not in allowed origins) → POST `/chat/flow-ai/message` returns `403 Forbidden`
 - [ ] Anonymous sessions: visitor skips pre-chat form → `visitors` table has no row, `sessions.ip_address=NULL`
+- [ ] Cross-channel identity: visitor submits form with known WhatsApp phone → `visitors.customer_id` set; agent context includes prior WhatsApp interaction history
+- [ ] Cross-channel identity: visitor submits form with unknown phone → `visitors.customer_id=NULL`, conversation starts fresh
 
 ### Compliance
 - [ ] PDPA notice visible on pre-chat form before submission
