@@ -122,6 +122,7 @@ def mock_client_config_obj():
     """Mock ClientConfig for webhook tests."""
     from unittest.mock import MagicMock
     config = MagicMock()
+    config.client_id = "hey-aircon"
     config.meta_verify_token = "heyaircon_webhook_2026"
     config.meta_phone_number_id = "123456789"
     config.meta_whatsapp_token = "test_token"

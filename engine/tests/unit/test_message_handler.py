@@ -781,6 +781,7 @@ async def test_opt_out_keyword_marks_booking_opted_out(
 ):
     """'stop' with active pending booking → followup_stage set to 'opted_out'."""
     mock_load_config.return_value = mock_client_config_obj
+    mock_client_config_obj.client_id = "test-client"
 
     # Build chains for each table interaction
     # 1. Escalation query returns non-escalated customer
@@ -873,6 +874,7 @@ async def test_opt_out_no_active_booking_falls_through_to_agent(
 ):
     """'stop' with no active pending booking → passes through to agent."""
     mock_load_config.return_value = mock_client_config_obj
+    mock_client_config_obj.client_id = "test-client"
     mock_build_system.return_value = "System message"
     mock_fetch_lead_days.return_value = 2
     mock_fetch_history.return_value = []
@@ -956,6 +958,7 @@ async def test_opt_out_logs_outbound_to_interactions_log(
 ):
     """Opt-out reply must be logged to interactions_log as outbound."""
     mock_load_config.return_value = mock_client_config_obj
+    mock_client_config_obj.client_id = "test-client"
 
     logged_rows = []
 
