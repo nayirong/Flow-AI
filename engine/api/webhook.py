@@ -20,6 +20,8 @@ from engine.config.client_config import load_client_config, ClientNotFoundError
 from engine.config.settings import get_settings
 from engine.core.message_handler import handle_inbound_message
 from engine.core.followup_scheduler import run_followup_scheduler
+from engine.api.cors_middleware import widget_cors_middleware
+from engine.api.widget import widget_router
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# ── Register widget CORS middleware ───────────────────────────────────────────
+# Must be registered BEFORE route definitions
+app.middleware("http")(widget_cors_middleware)
+
+# ── Include widget router ─────────────────────────────────────────────────────
+app.include_router(widget_router)
 
 
 # ---------------------------------------------------------------------------
