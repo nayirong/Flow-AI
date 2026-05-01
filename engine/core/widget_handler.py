@@ -118,6 +118,48 @@ async def handle_widget_message(
         if content:
             messages.append({"role": role, "content": content})
 
+    # 5a. Cross-channel history: if visitor has a linked WhatsApp customer, prepend prior history
+    try:
+        visitor_result = await client_db.table("visitors").select(
+            "customer_id"
+        ).eq("session_id", session_id).limit(1).execute()
+
+        visitor_rows = visitor_result.data or []
+        if visitor_rows and visitor_rows[0].get("customer_id"):
+            customer_id = visitor_rows[0]["customer_id"]
+            # Get customer phone_number
+            customer_result = await client_db.table("customers").select(
+                "phone_number"
+            ).eq("id", customer_id).limit(1).execute()
+
+            if customer_result.data:
+                phone_number = customer_result.data[0]["phone_number"]
+                # Fetch last 5 WhatsApp exchanges (10 rows)
+                wa_history_result = await client_db.table("interactions_log").select(
+                    "message_text, direction, created_at"
+                ).eq("phone_number", phone_number).eq("channel", "whatsapp").order(
+                    "created_at", desc=True
+                ).limit(10).execute()
+
+                wa_rows = list(reversed(wa_history_result.data or []))
+                if wa_rows:
+                    # Prepend WhatsApp history BEFORE widget history
+                    wa_messages = []
+                    for row in wa_rows:
+                        role = "user" if row["direction"] == "inbound" else "assistant"
+                        content = row.get("message_text", "")
+                        if content:
+                            wa_messages.append({"role": role, "content": f"[Prior WhatsApp] {content}"})
+                    
+                    messages = wa_messages + messages  # Prepend to front
+                    logger.info(
+                        f"Prepended {len(wa_messages)} WhatsApp messages for session {session_id} "
+                        f"(customer {customer_id})"
+                    )
+    except Exception as e:
+        logger.warning(f"Cross-channel history fetch failed for session {session_id}: {e}")
+        # Non-fatal — continue without cross-channel history
+
     # 6. Build system message from config/policies
     try:
         system_message = await build_system_message(client_db)
