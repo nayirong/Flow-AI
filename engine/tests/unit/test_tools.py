@@ -149,14 +149,14 @@ async def test_write_booking_inserts_row_and_updates_customer():
     assert "customers" in table_names
 
 
-def _make_db_for_booking_step3(total_bookings: int):
+def _make_db_for_booking_step3():
     """
     Supabase mock for write_booking Step 3.
 
     Call sequence:
       db.table("bookings").insert(...).execute()         → booking INSERT
       db.table("customers").update({name}).eq(...).execute()   → name UPDATE
-      db.table("customers").select("*").eq(...).limit(1).execute() → re-fetch with trigger-updated total_bookings
+      db.table("customers").select("*").eq(...).limit(1).execute() → re-fetch customer row
     """
     bookings_chain = MagicMock()
     bookings_chain.insert.return_value = bookings_chain
@@ -173,7 +173,7 @@ def _make_db_for_booking_step3(total_bookings: int):
     refetch_chain.eq.return_value = refetch_chain
     refetch_chain.limit.return_value = refetch_chain
     refetch_chain.execute = AsyncMock(
-        return_value=MagicMock(data=[{"id": 1, "total_bookings": total_bookings}])
+        return_value=MagicMock(data=[{"id": 1}])
     )
 
     customers_calls = [update_chain, refetch_chain]
@@ -200,7 +200,7 @@ async def test_write_booking_updates_customer_name_and_syncs_sheets():
     """
     from engine.core.tools.booking_tools import write_booking
 
-    db = _make_db_for_booking_step3(total_bookings=1)
+    db = _make_db_for_booking_step3()
     cfg = _make_client_config(has_calendar=True)
 
     result = await write_booking(
@@ -234,7 +234,7 @@ async def test_write_booking_refetches_customer_after_update():
     """
     from engine.core.tools.booking_tools import write_booking
 
-    db = _make_db_for_booking_step3(total_bookings=2)
+    db = _make_db_for_booking_step3()
     cfg = _make_client_config(has_calendar=True)
 
     result = await write_booking(

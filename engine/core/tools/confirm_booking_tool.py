@@ -245,8 +245,8 @@ async def confirm_booking(
         }
 
     # ── Step 6: Update customer name + sync to Sheets ────────────────────────
-    # total_bookings trigger fires on booking INSERT (already done in write_booking),
-    # not on UPDATE, so we just update the customer name here.
+    # We only update customer_name here — no booking count is stored on customers
+    # (total_bookings is computed on-demand via SELECT COUNT from bookings).
     try:
         await (
             db.table("customers")
@@ -254,7 +254,7 @@ async def confirm_booking(
             .eq("phone_number", phone_number)
             .execute()
         )
-        # Re-fetch for Sheets sync (gets trigger-updated values)
+        # Re-fetch for Sheets sync
         refreshed = await (
             db.table("customers")
             .select("*")

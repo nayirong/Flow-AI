@@ -272,7 +272,6 @@ async def test_escalate_triggers_sheets_sync_on_success(mock_send, mock_sheets_s
         "customer_name": "Test User",
         "escalation_flag": True,
         "escalation_reason": "Test reason",
-        "total_bookings": 0,
     }
     chain.execute = AsyncMock(return_value=MagicMock(data=[updated_row]))
 

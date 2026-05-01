@@ -44,6 +44,13 @@ clients:
     knowledge_base: clients/hey-aircon/product/knowledge
     prompt_library: clients/hey-aircon/product/prompts
     persona: clients/hey-aircon/product/persona.md
+  flow-ai:
+    path: clients/flow-ai
+    context: clients/flow-ai/context.md
+    product: clients/flow-ai/product
+    knowledge_base: clients/flow-ai/product/knowledge
+    persona: clients/flow-ai/product/persona.md
+    architecture: clients/flow-ai/plans/architecture.md
 
 tasks:
   active: .flow/tasks/active.md

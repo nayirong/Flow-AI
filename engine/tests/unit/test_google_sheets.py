@@ -62,7 +62,6 @@ async def test_empty_sheet_writes_header_and_row():
         "customer_name": "John Doe",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-02T00:00:00Z",
-        "total_bookings": 3,
         "escalation_flag": False,
     }
     
@@ -90,7 +89,7 @@ async def test_empty_sheet_writes_header_and_row():
     second_call = mock_worksheet.append_row.call_args_list[1][0][0]
     assert second_call[0] == "uuid-1"
     assert second_call[1] == "1234567890"
-    assert second_call[6] == "FALSE"
+    assert second_call[5] == "FALSE"
 
 
 @pytest.mark.asyncio
@@ -103,7 +102,6 @@ async def test_new_row_appended():
         "customer_name": "Jane Doe",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-02T00:00:00Z",
-        "total_bookings": 1,
         "escalation_flag": True,
     }
     
@@ -113,7 +111,7 @@ async def test_new_row_appended():
     # Existing rows: header + one data row with different UUID
     mock_worksheet.get_all_values.return_value = [
         CUSTOMER_HEADERS,
-        ["uuid-existing", "1111111111", "Existing", "2026-01-01", "2026-01-01", "0", "FALSE"],
+        ["uuid-existing", "1111111111", "Existing", "2026-01-01", "2026-01-01", "FALSE"],
     ]
     mock_spreadsheet.worksheet.return_value = mock_worksheet
     mock_gc.open_by_key.return_value = mock_spreadsheet
@@ -130,7 +128,7 @@ async def test_new_row_appended():
     mock_worksheet.append_row.assert_called_once()
     appended_row = mock_worksheet.append_row.call_args[0][0]
     assert appended_row[0] == "uuid-new"
-    assert appended_row[6] == "TRUE"  # escalation_flag
+    assert appended_row[5] == "TRUE"  # escalation_flag
 
 
 @pytest.mark.asyncio
@@ -143,7 +141,6 @@ async def test_existing_row_updated():
         "customer_name": "Updated Name",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-03T00:00:00Z",
-        "total_bookings": 5,
         "escalation_flag": False,
     }
     
@@ -152,7 +149,7 @@ async def test_existing_row_updated():
     mock_worksheet = MagicMock()
     mock_worksheet.get_all_values.return_value = [
         CUSTOMER_HEADERS,
-        ["uuid-existing", "1234567890", "Old Name", "2026-01-01", "2026-01-02", "3", "FALSE"],
+        ["uuid-existing", "1234567890", "Old Name", "2026-01-01", "2026-01-02", "FALSE"],
     ]
     mock_spreadsheet.worksheet.return_value = mock_worksheet
     mock_gc.open_by_key.return_value = mock_spreadsheet
@@ -168,11 +165,11 @@ async def test_existing_row_updated():
     # Verify update called (not append)
     mock_worksheet.update.assert_called_once()
     update_range = mock_worksheet.update.call_args[0][0]
-    assert update_range == "A2:I2"  # Row 2 (1-based, header is 1), 9 customer columns
+    assert update_range == "A2:H2"  # Row 2 (1-based, header is 1), 8 customer columns
     updated_row = mock_worksheet.update.call_args[0][1][0]
     assert updated_row[2] == "Updated Name"
     assert updated_row[4] == "2026-01-03 08:00 SGT"  # last_seen converted to SGT
-    assert updated_row[5] == "5"  # total_bookings
+    assert updated_row[5] == "FALSE"  # escalation_flag
     
     mock_worksheet.append_row.assert_not_called()
 
@@ -187,7 +184,6 @@ async def test_multiple_matches_updates_first_logs_warning():
         "customer_name": "Updated",
         "first_seen": "2026-01-01T00:00:00Z",
         "last_seen": "2026-01-04T00:00:00Z",
-        "total_bookings": 10,
         "escalation_flag": False,
     }
     
@@ -196,8 +192,8 @@ async def test_multiple_matches_updates_first_logs_warning():
     mock_worksheet = MagicMock()
     mock_worksheet.get_all_values.return_value = [
         CUSTOMER_HEADERS,
-        ["uuid-duplicate", "1234567890", "First", "2026-01-01", "2026-01-02", "3", "FALSE"],
-        ["uuid-duplicate", "1234567890", "Second", "2026-01-01", "2026-01-03", "5", "FALSE"],
+        ["uuid-duplicate", "1234567890", "First", "2026-01-01", "2026-01-02", "FALSE"],
+        ["uuid-duplicate", "1234567890", "Second", "2026-01-01", "2026-01-03", "FALSE"],
     ]
     mock_spreadsheet.worksheet.return_value = mock_worksheet
     mock_gc.open_by_key.return_value = mock_spreadsheet
@@ -218,7 +214,7 @@ async def test_multiple_matches_updates_first_logs_warning():
     # Verify first row updated
     mock_worksheet.update.assert_called_once()
     update_range = mock_worksheet.update.call_args[0][0]
-    assert update_range == "A2:I2"  # First match (row 2), 9 customer columns
+    assert update_range == "A2:H2"  # First match (row 2), 8 customer columns
 
 
 @pytest.mark.asyncio

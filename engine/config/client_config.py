@@ -49,6 +49,12 @@ class ClientConfig:
     sheets_sync_enabled: bool = False
     sheets_spreadsheet_id: str | None = None
     sheets_service_account_creds: dict | None = None
+    widget_enabled: bool = False
+    widget_primary_color: str = '#4F46E5'
+    widget_agent_name: str = 'Assistant'
+    widget_welcome_message: str = 'Hi! How can I help you today?'
+    widget_allowed_origins: str = ''
+    widget_session_ttl_minutes: int = 30
 
 
 class ClientNotFoundError(Exception):
@@ -87,6 +93,13 @@ async def load_client_config(client_id: str) -> ClientConfig:
     if client_id in _cache:
         config, expiry = _cache[client_id]
         if now < expiry:
+            # Defensive assertion: cache key must match stored client_id.
+            # A mismatch indicates a cache corruption bug — fail loudly rather
+            # than silently serving one client's config to another.
+            assert config.client_id == client_id, (
+                f"Cache key mismatch: expected '{client_id}', got '{config.client_id}'. "
+                "Cache is corrupted — this is a bug, not a client error."
+            )
             return config
     
     # 2. Query shared Supabase clients table
@@ -143,6 +156,12 @@ async def load_client_config(client_id: str) -> ClientConfig:
         sheets_sync_enabled=row.get("sheets_sync_enabled", False),
         sheets_spreadsheet_id=row.get("sheets_spreadsheet_id"),
         sheets_service_account_creds=row.get("sheets_service_account_creds"),
+        widget_enabled=row.get("widget_enabled", False),
+        widget_primary_color=row.get("widget_primary_color", '#4F46E5'),
+        widget_agent_name=row.get("widget_agent_name", 'Assistant'),
+        widget_welcome_message=row.get("widget_welcome_message", 'Hi! How can I help you today?'),
+        widget_allowed_origins=row.get("widget_allowed_origins", ''),
+        widget_session_ttl_minutes=row.get("widget_session_ttl_minutes", 30),
     )
     
     # 5. Cache with TTL

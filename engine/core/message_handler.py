@@ -190,6 +190,18 @@ async def handle_inbound_message(
         client_config = await load_client_config(client_id)
         db = await get_client_db(client_id)
 
+        # Guard: verify loaded config matches the requested client_id.
+        # Catches any cache contamination before it propagates to any client.
+        if client_config.client_id != client_id:
+            logger.critical(
+                "Client config ID mismatch: requested '%s', loaded '%s' — "
+                "aborting message processing for %s. This is a cache bug.",
+                client_id,
+                client_config.client_id,
+                phone_number,
+            )
+            return
+
         # ── Step 0: Human agent routing (inserted before inbound log) ─────────
         if phone_number == client_config.human_agent_number:
             logger.info(
