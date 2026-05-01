@@ -118,21 +118,33 @@ async def load_client_config(client_id: str) -> ClientConfig:
     if not meta_whatsapp_token:
         raise ClientConfigError(f"Missing env var: {client_id_upper}_META_WHATSAPP_TOKEN")
 
-    supabase_url = os.getenv(f"{client_id_upper}_SUPABASE_URL")
+    supabase_url = (
+        os.getenv(f"{client_id_upper}_SUPABASE_URL")
+        or os.getenv("SHARED_SUPABASE_URL")
+    )
     if not supabase_url:
-        raise ClientConfigError(f"Missing env var: {client_id_upper}_SUPABASE_URL")
+        raise ClientConfigError(f"Missing env var: {client_id_upper}_SUPABASE_URL (or SHARED_SUPABASE_URL)")
 
-    supabase_service_key = os.getenv(f"{client_id_upper}_SUPABASE_SERVICE_KEY")
+    supabase_service_key = (
+        os.getenv(f"{client_id_upper}_SUPABASE_SERVICE_KEY")
+        or os.getenv("SHARED_SUPABASE_SERVICE_KEY")
+    )
     if not supabase_service_key:
-        raise ClientConfigError(f"Missing env var: {client_id_upper}_SUPABASE_SERVICE_KEY")
+        raise ClientConfigError(f"Missing env var: {client_id_upper}_SUPABASE_SERVICE_KEY (or SHARED_SUPABASE_SERVICE_KEY)")
 
-    anthropic_api_key = os.getenv(f"{client_id_upper}_ANTHROPIC_API_KEY")
+    anthropic_api_key = (
+        os.getenv(f"{client_id_upper}_ANTHROPIC_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+    )
     if not anthropic_api_key:
-        raise ClientConfigError(f"Missing env var: {client_id_upper}_ANTHROPIC_API_KEY")
+        raise ClientConfigError(f"Missing env var: {client_id_upper}_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY)")
 
-    openai_api_key = os.getenv(f"{client_id_upper}_OPENAI_API_KEY")
+    openai_api_key = (
+        os.getenv(f"{client_id_upper}_OPENAI_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+    )
     if not openai_api_key:
-        raise ClientConfigError(f"Missing env var: {client_id_upper}_OPENAI_API_KEY")
+        raise ClientConfigError(f"Missing env var: {client_id_upper}_OPENAI_API_KEY (or OPENAI_API_KEY)")
 
     google_calendar_creds_json = os.getenv(f"{client_id_upper}_GOOGLE_CALENDAR_CREDS", "{}")
     google_calendar_creds = json.loads(google_calendar_creds_json)
