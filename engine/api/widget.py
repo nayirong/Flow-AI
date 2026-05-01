@@ -373,7 +373,7 @@ async def serve_widget_js(client_id: str):
     js_with_client_id = f"window.FLOWAI_CLIENT_ID = '{client_id}';\n{widget_js_content}"
 
     return Response(
-        content=js_with_client_id,
-        media_type="application/javascript",
+        content=js_with_client_id.encode("utf-8"),
+        media_type="application/javascript; charset=utf-8",
         headers={"Cache-Control": "public, max-age=3600"},
     )
