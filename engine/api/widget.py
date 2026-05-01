@@ -8,9 +8,11 @@ Four routes:
     GET   /widget/{client_id}.js       → serve widget JS with inlined client_id
 """
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -25,7 +27,26 @@ logger = logging.getLogger(__name__)
 widget_router = APIRouter()
 
 
+# ── Helper functions ──────────────────────────────────────────────────────────
+
+
+def _normalize_phone(phone: str) -> str:
+    """Normalize phone number to E.164 without + (e.g. 6591234567)."""
+    phone = re.sub(r"[\s\-\.]", "", phone)
+    if phone.startswith("+"):
+        phone = phone[1:]
+    if len(phone) == 8 and phone[0] in "689":
+        phone = "65" + phone
+    return phone
+
+
 # ── Request/Response models ───────────────────────────────────────────────────
+
+
+class CreateSessionRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None  # E.164 format or local SG format
 
 
 class CreateSessionResponse(BaseModel):
@@ -58,9 +79,14 @@ class HistoryResponse(BaseModel):
 
 
 @widget_router.post("/chat/{client_id}/session", response_model=CreateSessionResponse)
-async def create_session(client_id: str):
+async def create_session(client_id: str, request: CreateSessionRequest = CreateSessionRequest()):
     """
     Create a new widget session for the specified client.
+
+    Body (optional):
+        name: Visitor name
+        email: Visitor email
+        phone: Visitor phone (E.164 or local SG format)
 
     Returns:
         session_id and welcome_message
@@ -94,6 +120,39 @@ async def create_session(client_id: str):
     except Exception as e:
         logger.error(f"Failed to create session for {client_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create session")
+
+    # Identity linking: match phone to existing customer
+    customer_id = None
+    normalized_phone = None
+    
+    if request.phone:
+        try:
+            normalized_phone = _normalize_phone(request.phone)
+            customer_result = await client_db.table("customers").select(
+                "id"
+            ).eq("phone_number", normalized_phone).limit(1).execute()
+            
+            if customer_result.data:
+                customer_id = customer_result.data[0]["id"]
+                logger.info(f"Linked session {session_id} to customer {customer_id} via phone {normalized_phone}")
+        except Exception as e:
+            # Identity lookup failure is non-fatal
+            logger.warning(f"Failed to lookup customer for phone {request.phone}: {e}")
+
+    # Insert into visitors table (always, even if no form data)
+    try:
+        await client_db.table("visitors").insert({
+            "session_id": session_id,
+            "client_id": client_id,
+            "name": request.name,
+            "email": request.email,
+            "phone": normalized_phone,
+            "customer_id": customer_id,
+            "created_at": now,
+        }).execute()
+    except Exception as e:
+        # Visitor creation failure is non-fatal (session still works)
+        logger.error(f"Failed to create visitor for session {session_id}: {e}", exc_info=True)
 
     return CreateSessionResponse(
         session_id=session_id,
