@@ -6,8 +6,20 @@
   'use strict';
   
   // ── Config ─────────────────────────────────────────────────────────────────
-  const CLIENT_ID = window.FLOWAI_CLIENT_ID || '';
+  const _cfg = window.FLOWAI_CONFIG || {};
+  const CLIENT_ID = _cfg.clientId || '';
   const SESSION_KEY = 'flowai_session_' + CLIENT_ID;
+  const PRIMARY_COLOR = _cfg.primaryColor || '#1B5E3F';
+  const BUTTON_ICON = _cfg.buttonIcon || '💬';
+
+  function _darkenColor(hex, pct) {
+    const n = parseInt(hex.replace('#', ''), 16);
+    const r = Math.max(0, Math.floor((n >> 16) * (1 - pct / 100)));
+    const g = Math.max(0, Math.floor(((n >> 8) & 0xff) * (1 - pct / 100)));
+    const b = Math.max(0, Math.floor((n & 0xff) * (1 - pct / 100)));
+    return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+  const HOVER_COLOR = _darkenColor(PRIMARY_COLOR, 10);
   
   // Derive base URL from script src
   const _scriptSrc = document.currentScript ? document.currentScript.src : '';
@@ -27,7 +39,7 @@
         width: 60px;
         height: 60px;
         border-radius: 50%;
-        background: #4F46E5;
+        background: ${PRIMARY_COLOR};
         color: white;
         font-size: 28px;
         display: flex;
@@ -55,7 +67,7 @@
         flex-direction: column;
       }
       #flowai-widget-header {
-        background: #4F46E5;
+        background: ${PRIMARY_COLOR};
         color: white;
         padding: 16px;
         border-radius: 12px 12px 0 0;
@@ -96,7 +108,7 @@
         font-size: 14px;
       }
       #flowai-start-chat {
-        background: #4F46E5;
+        background: ${PRIMARY_COLOR};
         color: white;
         border: none;
         padding: 12px;
@@ -107,7 +119,7 @@
         margin-top: 8px;
       }
       #flowai-start-chat:hover {
-        background: #4338CA;
+        background: ${HOVER_COLOR};
       }
       #flowai-chat-body {
         display: flex;
@@ -133,7 +145,7 @@
       }
       .flowai-message-user {
         align-self: flex-end;
-        background: #4F46E5;
+        background: ${PRIMARY_COLOR};
         color: white;
       }
       .flowai-message-agent {
@@ -171,7 +183,7 @@
         font-size: 14px;
       }
       #flowai-send-btn {
-        background: #4F46E5;
+        background: ${PRIMARY_COLOR};
         color: white;
         border: none;
         padding: 10px 16px;
@@ -181,7 +193,7 @@
         cursor: pointer;
       }
       #flowai-send-btn:hover {
-        background: #4338CA;
+        background: ${HOVER_COLOR};
       }
     `;
     document.head.appendChild(style);
@@ -191,7 +203,7 @@
   function injectHTML() {
     const container = document.createElement('div');
     container.innerHTML = `
-      <div id="flowai-widget-btn">💬</div>
+      <div id="flowai-widget-btn">${BUTTON_ICON}</div>
       <div id="flowai-widget-window" style="display:none">
         <div id="flowai-widget-header">
           <span id="flowai-widget-title">Assistant</span>

@@ -55,6 +55,7 @@ class ClientConfig:
     widget_welcome_message: str = 'Hi! How can I help you today?'
     widget_allowed_origins: str = ''
     widget_session_ttl_minutes: int = 30
+    widget_button_icon: str = '💬'
 
 
 class ClientNotFoundError(Exception):
@@ -174,6 +175,7 @@ async def load_client_config(client_id: str) -> ClientConfig:
         widget_welcome_message=row.get("widget_welcome_message", 'Hi! How can I help you today?'),
         widget_allowed_origins=row.get("widget_allowed_origins", ''),
         widget_session_ttl_minutes=row.get("widget_session_ttl_minutes", 30),
+        widget_button_icon=row.get("widget_button_icon", "💬"),
     )
     
     # 5. Cache with TTL

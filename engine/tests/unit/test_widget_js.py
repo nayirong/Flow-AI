@@ -25,11 +25,13 @@ def mock_client_config():
     config = MagicMock()
     config.widget_enabled = True
     config.widget_welcome_message = "Welcome!"
+    config.widget_primary_color = '#1B5E3F'
+    config.widget_button_icon = '💬'
     return config
 
 
 def test_widget_js_injects_client_id(client, mock_client_config):
-    """Test that GET /widget/{client_id}.js injects the client ID."""
+    """Test that GET /widget/{client_id}.js injects the client ID via FLOWAI_CONFIG."""
     with patch('engine.api.widget.load_client_config', new_callable=AsyncMock) as mock_load:
         mock_load.return_value = mock_client_config
         
@@ -37,7 +39,8 @@ def test_widget_js_injects_client_id(client, mock_client_config):
         
         assert response.status_code == 200
         assert "application/javascript" in response.headers["content-type"]
-        assert "window.FLOWAI_CLIENT_ID = 'hey-aircon';" in response.text
+        assert 'window.FLOWAI_CONFIG' in response.text
+        assert '"clientId": "hey-aircon"' in response.text
 
 
 def test_widget_js_cache_control_header(client, mock_client_config):
@@ -84,7 +87,7 @@ def test_widget_js_body_starts_with_client_id_injection(client, mock_client_conf
         
         assert response.status_code == 200
         # Verify the injection is at the start
-        assert response.text.startswith("window.FLOWAI_CLIENT_ID")
+        assert response.text.startswith("window.FLOWAI_CONFIG")
 
 
 def test_widget_js_contains_static_file_content(client, mock_client_config):
@@ -100,3 +103,64 @@ def test_widget_js_contains_static_file_content(client, mock_client_config):
         # Verify it contains widget-specific code
         assert "flowai-widget-btn" in response.text
         assert "flowai-widget-window" in response.text
+
+
+def test_serve_widget_js_injects_flowai_config(client, mock_client_config):
+    """Served JS contains window.FLOWAI_CONFIG object not window.FLOWAI_CLIENT_ID."""
+    mock_client_config.widget_primary_color = '#1B5E3F'
+    mock_client_config.widget_button_icon = '💬'
+    
+    with patch('engine.api.widget.load_client_config', new_callable=AsyncMock) as mock_load:
+        mock_load.return_value = mock_client_config
+        
+        response = client.get("/widget/hey-aircon.js")
+        
+        assert response.status_code == 200
+        assert 'window.FLOWAI_CONFIG' in response.text
+        assert '"clientId": "hey-aircon"' in response.text
+        assert '"primaryColor": "#1B5E3F"' in response.text
+        assert '"buttonIcon": "💬"' in response.text
+        assert 'window.FLOWAI_CLIENT_ID' not in response.text  # old pattern removed
+
+
+def test_serve_widget_js_no_hardcoded_indigo(client, mock_client_config):
+    """Served JS does not contain hardcoded #4F46E5."""
+    mock_client_config.widget_primary_color = '#1B5E3F'
+    mock_client_config.widget_button_icon = '💬'
+    
+    with patch('engine.api.widget.load_client_config', new_callable=AsyncMock) as mock_load:
+        mock_load.return_value = mock_client_config
+        
+        response = client.get("/widget/hey-aircon.js")
+        
+        assert response.status_code == 200
+        assert '#4F46E5' not in response.text
+
+
+def test_serve_widget_js_invalid_hex_fallback(client, mock_client_config):
+    """Invalid hex color falls back to #1B5E3F."""
+    mock_client_config.widget_primary_color = 'not-a-color'
+    mock_client_config.widget_button_icon = '💬'
+    
+    with patch('engine.api.widget.load_client_config', new_callable=AsyncMock) as mock_load:
+        mock_load.return_value = mock_client_config
+        
+        response = client.get("/widget/hey-aircon.js")
+        
+        assert response.status_code == 200
+        assert '"primaryColor": "#1B5E3F"' in response.text
+
+
+def test_serve_widget_js_icon_truncated(client, mock_client_config):
+    """Icon longer than 4 chars is truncated."""
+    mock_client_config.widget_primary_color = '#1B5E3F'
+    mock_client_config.widget_button_icon = 'toolong'
+    
+    with patch('engine.api.widget.load_client_config', new_callable=AsyncMock) as mock_load:
+        mock_load.return_value = mock_client_config
+        
+        response = client.get("/widget/hey-aircon.js")
+        
+        assert response.status_code == 200
+        assert '"buttonIcon": "tool"' in response.text
+

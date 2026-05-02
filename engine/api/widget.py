@@ -369,8 +369,34 @@ async def serve_widget_js(client_id: str):
             status_code=500,
         )
 
-    # Prepend client_id
-    js_with_client_id = f"window.FLOWAI_CLIENT_ID = '{client_id}';\n{widget_js_content}"
+    # Prepend client config injection
+    # Validate hex color
+    primary_color = client_config.widget_primary_color or "#1B5E3F"
+    if not re.match(r'^#[0-9A-Fa-f]{6}$', primary_color):
+        logger.warning(
+            f"Invalid widget_primary_color '{primary_color}' for client {client_id}. "
+            f"Falling back to #1B5E3F"
+        )
+        primary_color = "#1B5E3F"
+
+    # Validate and truncate icon
+    button_icon = client_config.widget_button_icon or "💬"
+    if len(button_icon) > 4:
+        logger.warning(
+            f"widget_button_icon for client {client_id} exceeds 4 chars. "
+            f"Truncating to '{button_icon[:4]}'"
+        )
+        button_icon = button_icon[:4]
+
+    # Inject config object — widget.js reads from window.FLOWAI_CONFIG
+    config_block = (
+        f'window.FLOWAI_CONFIG = {{'
+        f'"clientId": "{client_id}", '
+        f'"primaryColor": "{primary_color}", '
+        f'"buttonIcon": "{button_icon}"'
+        f'}};\n'
+    )
+    js_with_client_id = config_block + widget_js_content
 
     return Response(
         content=js_with_client_id.encode("utf-8"),

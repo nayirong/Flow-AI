@@ -234,14 +234,16 @@ def test_widget_js_success(client, mock_env_vars, clear_client_config_cache):
     # Mock ClientConfig
     mock_client_config = MagicMock()
     mock_client_config.widget_enabled = True
+    mock_client_config.widget_primary_color = '#1B5E3F'
+    mock_client_config.widget_button_icon = '💬'
     
     with patch('engine.api.widget.load_client_config', return_value=mock_client_config):
         response = client.get("/widget/test-client.js")
         
         assert response.status_code == 200
-        assert response.headers["content-type"] == "application/javascript"
-        assert "FLOWAI_CLIENT_ID" in response.text
-        assert "'test-client'" in response.text
+        assert response.headers["content-type"] == "application/javascript; charset=utf-8"
+        assert 'window.FLOWAI_CONFIG' in response.text
+        assert '"clientId": "test-client"' in response.text
 
 
 def test_widget_js_client_not_found(client, mock_env_vars, clear_client_config_cache):
