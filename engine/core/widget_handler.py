@@ -68,7 +68,7 @@ async def handle_widget_message(
     # 3. Escalation gate — check visitors table
     try:
         visitor_result = await client_db.table("visitors").select(
-            "visitor_id, escalation_flag"
+            "escalation_flag"
         ).eq("session_id", session_id).limit(1).execute()
 
         if visitor_result.data and visitor_result.data[0].get("escalation_flag") is True:
