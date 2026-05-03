@@ -24,3 +24,6 @@ ALTER TABLE policies ADD COLUMN IF NOT EXISTS sort_order  INTEGER NOT NULL DEFAU
 -- Widget inserts use message_text + direction and do not set the WhatsApp-era
 -- 'role' column. Must be nullable for widget rows to insert cleanly.
 ALTER TABLE interactions_log ALTER COLUMN role DROP NOT NULL;
+
+-- Widget inserts use message_text + direction; keep legacy 'content' nullable.
+ALTER TABLE interactions_log ALTER COLUMN content DROP NOT NULL;

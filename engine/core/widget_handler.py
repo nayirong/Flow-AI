@@ -55,6 +55,8 @@ async def handle_widget_message(
             "channel": "widget",
             "session_id": session_id,
             "phone_number": None,
+            "role": "user",
+            "content": message,
             "message_text": message,
             "direction": "inbound",
         }).execute()
@@ -78,6 +80,8 @@ async def handle_widget_message(
                     "channel": "widget",
                     "session_id": session_id,
                     "phone_number": None,
+                    "role": "assistant",
+                    "content": HOLDING_REPLY,
                     "message_text": HOLDING_REPLY,
                     "direction": "outbound",
                 }).execute()
@@ -178,6 +182,8 @@ async def handle_widget_message(
                 "channel": "widget",
                 "session_id": session_id,
                 "phone_number": None,
+                "role": "assistant",
+                "content": error_reply,
                 "message_text": error_reply,
                 "direction": "outbound",
             }).execute()
@@ -186,7 +192,7 @@ async def handle_widget_message(
         return (error_reply, False)
 
     # 7. Build tool definitions and dispatch
-    tool_definitions = build_tool_definitions()
+    tool_definitions = build_tool_definitions(pending_booking=None)
     # Widget sessions don't have phone numbers; use session_id as identifier
     tool_dispatch = build_tool_dispatch(
         db=client_db,
@@ -220,6 +226,8 @@ async def handle_widget_message(
             "channel": "widget",
             "session_id": session_id,
             "phone_number": None,
+            "role": "assistant",
+            "content": reply,
             "message_text": reply,
             "direction": "outbound",
         }).execute()
