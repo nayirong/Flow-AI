@@ -159,6 +159,62 @@ def test_widget_js_route_cors(app_with_cors, mock_env_vars, clear_client_config_
         assert response.headers["Access-Control-Allow-Origin"] == "https://example.com"
 
 
+def test_allowed_origin_with_trailing_slash_matches(app_with_cors, mock_env_vars, clear_client_config_cache):
+    """Config entries with trailing slash should still match request origin."""
+    mock_client_config = MagicMock()
+    mock_client_config.widget_enabled = True
+    mock_client_config.widget_allowed_origins = "https://example.com/"
+
+    with patch('engine.api.cors_middleware.load_client_config', return_value=mock_client_config):
+        client = TestClient(app_with_cors)
+
+        response = client.post(
+            "/chat/test-client/session",
+            headers={"Origin": "https://example.com"}
+        )
+
+        assert response.status_code == 200
+
+
+def test_host_only_allowlist_matches_origin(app_with_cors, mock_env_vars, clear_client_config_cache):
+    """Host-only allowlist entries should match both http/https origins for that host."""
+    mock_client_config = MagicMock()
+    mock_client_config.widget_enabled = True
+    mock_client_config.widget_allowed_origins = "example.com"
+
+    with patch('engine.api.cors_middleware.load_client_config', return_value=mock_client_config):
+        client = TestClient(app_with_cors)
+
+        response = client.post(
+            "/chat/test-client/session",
+            headers={"Origin": "https://example.com"}
+        )
+
+        assert response.status_code == 200
+
+
+def test_wildcard_subdomain_matches_origin(app_with_cors, mock_env_vars, clear_client_config_cache):
+    """Wildcard allowlist entries should allow subdomains only."""
+    mock_client_config = MagicMock()
+    mock_client_config.widget_enabled = True
+    mock_client_config.widget_allowed_origins = "*.example.com"
+
+    with patch('engine.api.cors_middleware.load_client_config', return_value=mock_client_config):
+        client = TestClient(app_with_cors)
+
+        allowed_response = client.post(
+            "/chat/test-client/session",
+            headers={"Origin": "https://shop.example.com"}
+        )
+        blocked_response = client.post(
+            "/chat/test-client/session",
+            headers={"Origin": "https://example.com"}
+        )
+
+        assert allowed_response.status_code == 200
+        assert blocked_response.status_code == 403
+
+
 def test_no_origin_header_passes_through(app_with_cors, mock_env_vars, clear_client_config_cache):
     """Test that requests without Origin header are allowed (curl, Postman, same-origin)."""
     # Mock ClientConfig

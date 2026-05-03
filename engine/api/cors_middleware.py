@@ -6,6 +6,7 @@ Non-widget paths are passed through unchanged.
 """
 import os
 import logging
+from urllib.parse import urlsplit
 from fastapi import Request, Response
 from engine.config.client_config import load_client_config, ClientNotFoundError
 
@@ -21,6 +22,76 @@ LOCALHOST_ORIGINS = [
 ]
 
 WIDGET_PATH_PREFIXES = ("/chat/", "/widget/")
+
+
+def _normalize_origin(value: str) -> str:
+    """Return canonical scheme://host[:port] origin string or empty on invalid input."""
+    if not value:
+        return ""
+
+    raw = value.strip().rstrip("/")
+    if not raw:
+        return ""
+
+    # Origin header is scheme://host[:port]. Allow host-only entries in config.
+    parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+    host = parsed.hostname
+    if not host:
+        return ""
+
+    if parsed.scheme:
+        origin = f"{parsed.scheme.lower()}://{host.lower()}"
+        if parsed.port:
+            origin = f"{origin}:{parsed.port}"
+        return origin
+
+    # Host-only allowlist entry
+    host_only = host.lower()
+    if parsed.port:
+        host_only = f"{host_only}:{parsed.port}"
+    return host_only
+
+
+def _is_origin_allowed(origin: str, allowed_origins: list[str]) -> bool:
+    """Validate request origin against normalized exact, host-only, and wildcard entries."""
+    normalized_request = _normalize_origin(origin)
+    if not normalized_request or "://" not in normalized_request:
+        return False
+
+    request_host_port = normalized_request.split("://", 1)[1]
+
+    exact_matches: set[str] = set()
+    host_matches: set[str] = set()
+    wildcard_matches: list[str] = []
+
+    for allowed in allowed_origins:
+        item = _normalize_origin(allowed)
+        if not item:
+            continue
+
+        if item.startswith("*."):
+            wildcard_matches.append(item[2:])
+            continue
+
+        if "://" in item:
+            exact_matches.add(item)
+        else:
+            host_matches.add(item)
+
+    if normalized_request in exact_matches:
+        return True
+
+    if request_host_port in host_matches:
+        return True
+
+    request_host = request_host_port.split(":", 1)[0]
+    for wildcard in wildcard_matches:
+        # wildcard supports hosts like *.example.com (not apex example.com)
+        wildcard_host = wildcard.split(":", 1)[0]
+        if request_host.endswith(f".{wildcard_host}"):
+            return True
+
+    return False
 
 
 async def widget_cors_middleware(request: Request, call_next):
@@ -71,7 +142,7 @@ async def widget_cors_middleware(request: Request, call_next):
 
     # OPTIONS preflight — validate and return early
     if request.method == "OPTIONS":
-        if origin not in allowed_origins:
+        if not _is_origin_allowed(origin, allowed_origins):
             return Response(status_code=403, content="Origin not allowed")
         return Response(
             status_code=204,
@@ -85,7 +156,7 @@ async def widget_cors_middleware(request: Request, call_next):
         )
 
     # Non-OPTIONS: validate origin
-    if origin not in allowed_origins:
+    if not _is_origin_allowed(origin, allowed_origins):
         return Response(status_code=403, content="Origin not allowed")
 
     # Process request
