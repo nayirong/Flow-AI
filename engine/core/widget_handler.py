@@ -114,13 +114,18 @@ async def handle_widget_message(
         )
         history_rows = []
 
-    # 5. Format as Claude messages list (reverse to chronological order)
+    # 5. Format history for agent call (reverse to chronological order)
     messages = []
     for row in reversed(history_rows):
         role = "user" if row["direction"] == "inbound" else "assistant"
         content = row.get("message_text", "")
         if content:
             messages.append({"role": role, "content": content})
+
+    # run_agent receives the current user message separately.
+    # Remove the latest inbound copy from history if present to avoid duplication.
+    if messages and messages[-1].get("role") == "user" and messages[-1].get("content") == message:
+        messages = messages[:-1]
 
     # 5a. Cross-channel history: if visitor has a linked WhatsApp customer, prepend prior history
     try:
@@ -205,10 +210,14 @@ async def handle_widget_message(
     try:
         reply = await run_agent(
             system_message=system_message,
-            messages=messages,
+            conversation_history=messages,
+            current_message=message,
             tool_definitions=tool_definitions,
             tool_dispatch=tool_dispatch,
             client_id=client_id,
+            anthropic_api_key=client_config.anthropic_api_key,
+            openai_api_key=client_config.openai_api_key,
+            pending_booking_id=None,
         )
     except Exception as e:
         logger.error(
