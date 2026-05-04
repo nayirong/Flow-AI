@@ -3,7 +3,7 @@ name: Evaluation CI
 on:
   pull_request:
     branches:
-      - main
+      - master
     paths:
       - 'engine/**'
       - 'Product/docs/**'
@@ -41,7 +41,7 @@ jobs:
           python -m engine.tests.eval.run_eval \
             --report-format html \
             --output-dir ./eval_reports \
-            --compare-branch main
+            --compare-branch master
       
       - name: Upload HTML report
         if: always()

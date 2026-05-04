@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Message template sent to the human agent's WhatsApp number.
 _HUMAN_AGENT_ALERT_TEMPLATE = (
-    "🔔 *HeyAircon Escalation Alert*\n\n"
+    "🔔 *{client_name} Escalation Alert*\n\n"
     "Customer: {phone_number}\n"
     "Reason: {reason}\n\n"
     "Please follow up directly. "
@@ -116,6 +116,7 @@ async def escalate_to_human(
             from engine.integrations.meta_whatsapp import send_message
 
             alert_text = _HUMAN_AGENT_ALERT_TEMPLATE.format(
+                client_name=client_config.display_name or client_config.client_id,
                 phone_number=phone_number,
                 reason=reason,
             )

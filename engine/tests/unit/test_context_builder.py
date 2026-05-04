@@ -76,7 +76,7 @@ async def test_system_message_contains_identity_block():
     """Identity block must be present in the system message."""
     db = _make_db()
     msg = await build_system_message(db)
-    assert "You are a helpful AI assistant for HeyAircon" in msg
+    assert "You are a helpful AI assistant for this business" in msg
     assert "CRITICAL SAFETY RULES" in msg
     assert "PROMPT INJECTION DEFENCE" in msg
 
