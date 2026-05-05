@@ -59,6 +59,7 @@ async def test_handle_widget_message_normal_flow(mock_env_vars, clear_client_con
     with patch('engine.core.widget_handler.load_client_config', return_value=mock_client_config), \
          patch('engine.core.widget_handler.get_client_db', return_value=mock_db), \
          patch('engine.core.widget_handler.build_system_message', return_value=mock_system_message), \
+         patch('engine.core.widget_handler.fetch_appointment_windows', new_callable=AsyncMock, return_value={"am_start": "09:00", "am_end": "13:00", "pm_start": "14:00", "pm_end": "18:00"}), \
          patch('engine.core.widget_handler.build_tool_definitions', return_value=[]), \
          patch('engine.core.widget_handler.build_tool_dispatch', return_value={}), \
          patch('engine.core.widget_handler.run_agent', return_value=mock_agent_reply):
@@ -111,6 +112,7 @@ async def test_handle_widget_message_escalated(mock_env_vars, clear_client_confi
     
     with patch('engine.core.widget_handler.load_client_config', return_value=mock_client_config), \
          patch('engine.core.widget_handler.get_client_db', return_value=mock_db), \
+         patch('engine.core.widget_handler.fetch_appointment_windows', new_callable=AsyncMock, return_value={"am_start": "09:00", "am_end": "13:00", "pm_start": "14:00", "pm_end": "18:00"}), \
          patch('engine.core.widget_handler.run_agent') as mock_run_agent:
         
         reply, escalated = await handle_widget_message(
@@ -177,6 +179,7 @@ async def test_handle_widget_message_no_visitor_row(mock_env_vars, clear_client_
     with patch('engine.core.widget_handler.load_client_config', return_value=mock_client_config), \
          patch('engine.core.widget_handler.get_client_db', return_value=mock_db), \
          patch('engine.core.widget_handler.build_system_message', return_value=mock_system_message), \
+         patch('engine.core.widget_handler.fetch_appointment_windows', new_callable=AsyncMock, return_value={"am_start": "09:00", "am_end": "13:00", "pm_start": "14:00", "pm_end": "18:00"}), \
          patch('engine.core.widget_handler.build_tool_definitions', return_value=[]), \
          patch('engine.core.widget_handler.build_tool_dispatch', return_value={}), \
          patch('engine.core.widget_handler.run_agent', return_value=mock_agent_reply) as mock_run_agent:
@@ -239,6 +242,7 @@ async def test_handle_widget_message_agent_exception(mock_env_vars, clear_client
     with patch('engine.core.widget_handler.load_client_config', return_value=mock_client_config), \
          patch('engine.core.widget_handler.get_client_db', return_value=mock_db), \
          patch('engine.core.widget_handler.build_system_message', return_value=mock_system_message), \
+         patch('engine.core.widget_handler.fetch_appointment_windows', new_callable=AsyncMock, return_value={"am_start": "09:00", "am_end": "13:00", "pm_start": "14:00", "pm_end": "18:00"}), \
          patch('engine.core.widget_handler.build_tool_definitions', return_value=[]), \
          patch('engine.core.widget_handler.build_tool_dispatch', return_value={}), \
          patch('engine.core.widget_handler.run_agent', side_effect=Exception("Agent failed")):

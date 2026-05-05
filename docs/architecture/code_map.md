@@ -22,23 +22,36 @@
 
 ## 2. File Index
 
+### Core Platform Files (WhatsApp Channel)
+
 | File | What it does | Flow step(s) |
 |------|-------------|--------------|
-| `api/webhook.py` | FastAPI app: health check, Meta webhook verification (GET), inbound message receiver (POST); always returns 200 to Meta | 1–2 |
+| `api/webhook.py` | FastAPI app: health check, Meta webhook verification (GET), inbound message receiver (POST); APScheduler setup for follow-up + session expiry jobs; always returns 200 to Meta | 1–2 |
 | `core/message_handler.py` | Full pipeline orchestrator: log inbound, escalation gate, customer upsert, invoke context builder + agent runner, send reply, log outbound | 3–10 |
-| `core/context_builder.py` | Builds Claude system prompt from per-client `config` + `policies` tables; fetches last 20 messages from `interactions_log` as conversation history | 8 |
+| `core/context_builder.py` | Builds Claude system prompt from per-client `config` + `policies` tables; fetches last 20 messages from `interactions_log` as conversation history; supports `channel` parameter to adjust prompt for widget vs WhatsApp | 8 |
 | `core/agent_runner.py` | Claude tool-use loop: LLM provider shim (Anthropic primary / GPT-4o-mini fallback / GitHub Models for eval), executes tools, handles fallback logic, logs usage and incidents | 9 |
 | `core/tools/__init__.py` | Exports `TOOL_DEFINITIONS` and `build_tool_dispatch()`; `build_tool_dispatch()` injects `db`, `client_config`, `phone_number` into tool closures per request | 9 |
 | `core/tools/definitions.py` | Static list of 4 Anthropic-format tool dicts: `check_calendar_availability`, `write_booking`, `get_customer_bookings`, `escalate_to_human` | 9 |
 | `core/tools/calendar_tools.py` | `check_calendar_availability()` — wraps `integrations/google_calendar.py`; returns AM/PM availability + human-readable message for Claude | 9 |
-| `core/tools/booking_tools.py` | `write_booking()` — calendar event + Supabase INSERT into `bookings` (incl. `address`, `postal_code` post-migration) + customer name update; `get_customer_bookings()` — reads last 5 bookings; alerts human agent on backend failure | 9 |
+| `core/tools/booking_tools.py` | `write_booking()` — calendar event + Supabase INSERT into `bookings` (incl. `address`, `postal_code`, `channel`, `session_id` params) + customer name update; `get_customer_bookings()` — reads last 5 bookings; alerts human agent on backend failure | 9 |
 | `core/tools/escalation_tool.py` | `escalate_to_human()` — sets `escalation_flag=True` on customer row, sends WhatsApp alert to `human_agent_number` | 9 |
 | `config/settings.py` | `Settings` (pydantic-settings): platform-level env vars — `SHARED_SUPABASE_URL`, `SHARED_SUPABASE_SERVICE_KEY`, `LOG_LEVEL`; lazy singleton via `get_settings()` | 4 |
-| `config/client_config.py` | `ClientConfig` dataclass + `load_client_config()`: reads shared `clients` table + 5 per-client env vars; in-process TTL cache (5 min) | 4 |
+| `config/client_config.py` | `ClientConfig` dataclass + `load_client_config()`: reads shared `clients` table + 5 per-client env vars (incl. widget config fields); in-process TTL cache (5 min) | 4 |
 | `integrations/meta_whatsapp.py` | `send_message()` — POST to Meta Graph API v19.0; `verify_webhook_token()` — token comparison for GET verification | 2, 10 |
 | `integrations/supabase_client.py` | `get_shared_db()` — shared Flow AI Supabase client; `get_client_db(client_id)` — per-client Supabase client; no caching, new client per call | 4, 5–10 |
 | `integrations/google_calendar.py` | `check_slot_availability()` — freebusy query for AM/PM windows; `create_booking_event()` — insert-only calendar event; sync Google API wrapped in `run_in_executor` | 9 |
 | `integrations/observability.py` | `log_incident()` — writes to shared `api_incidents` on LLM failure; `log_usage()` — writes to shared `api_usage` on every successful LLM call; `extract_usage()` — normalises token counts across providers | 9–10 |
+
+### Widget Channel Files (Phase 1 — NEW)
+
+| File | What it does | Purpose |
+|------|-------------|---------|
+| `api/chat_routes.py` | FastAPI routes: `POST /chat/{client_id}/session` (create session), `POST /chat/{client_id}/message` (send message), `GET /chat/{client_id}/history` (fetch conversation history) | Widget API endpoints — session management and message handling |
+| `api/widget_routes.py` | FastAPI route: `GET /widget/{client_id}.js` — serves static JavaScript with inlined `client_id` | Widget JavaScript delivery with server-side template injection |
+| `api/cors_middleware.py` | FastAPI middleware: validates `Origin` header against `clients.widget_allowed_origins`; handles OPTIONS preflight; development bypass for localhost | CORS validation for all `/chat/*` endpoints |
+| `core/widget_handler.py` | Widget message processing pipeline: escalation gate (queries `visitors` table), context builder invocation with `channel='widget'`, agent runner, cross-channel identity matching | Mirrors `message_handler.py` structure for widget channel |
+| `core/session_expiry_job.py` | APScheduler job (runs every 5 minutes): marks sessions as expired if `last_active_at` exceeds `widget_session_ttl_minutes` | Session expiry background job for all active clients |
+| `static/widget.js` | Vanilla JavaScript (no framework): chat button, chat window, message rendering, localStorage session management, API calls to `/chat/{client_id}/*` | Widget frontend — embedded on client websites via `<script>` tag |
 
 ---
 
@@ -73,6 +86,8 @@
 
 ## 4. Where to Look
 
+### WhatsApp Channel
+
 | Task | First file to open |
 |------|--------------------|
 | Change the agent's system prompt or persona | `core/context_builder.py` — identity block is hardcoded in `_IDENTITY_BLOCK`; services/pricing/policies come from per-client Supabase `config` and `policies` tables |
@@ -85,3 +100,17 @@
 | Modify calendar availability logic | `integrations/google_calendar.py` — `check_slot_availability()` freebusy query and `_SLOT_TIMES` windows |
 | Change the holding reply text (escalated customers) | `core/message_handler.py` — `HOLDING_REPLY` constant at module level |
 | Update services, pricing, or policies (no code change needed) | Supabase Studio — per-client `config` table (keys: `service_*`, `pricing_*`, `appointment_window_am/pm`, `booking_lead_time_days`) and `policies` table |
+
+### Widget Channel (Phase 1)
+
+| Task | First file to open |
+|------|--------------------|
+| Add a new widget API endpoint | `api/chat_routes.py` — add route handler, register in FastAPI app |
+| Change widget button appearance or behavior | `static/widget.js` — button rendering, click handlers, CSS styles || Modify widget button appearance (color, icon) or hover states | `engine/static/widget.js` — `injectStyles()` function for CSS, `injectHTML()` for button icon; config extracted from `window.FLOWAI_CONFIG` at top of IIFE || Modify widget CORS validation logic | `api/cors_middleware.py` — origin whitelist parsing, development bypass logic |
+| Change widget escalation behavior | `core/widget_handler.py` — escalation gate logic (queries `visitors` table instead of `customers`) |
+| Modify widget session expiry threshold | `clients` table in shared Supabase — update `widget_session_ttl_minutes` column (no code change) |
+| Change widget JavaScript delivery or caching | `api/widget.py` — `serve_widget_js()` function; validates and injects `window.FLOWAI_CONFIG` (clientId, primaryColor, buttonIcon), Cache-Control headers |
+| Add widget configuration fields | `config/client_config.py` — add fields to `ClientConfig` dataclass + update `load_client_config()` |
+| Modify cross-channel identity matching | `core/widget_handler.py` — phone lookup logic, `visitors.customer_id` FK assignment |
+| Debug widget session expiry job | `core/session_expiry_job.py` — scheduler logic, expiry SQL query |
+| Update widget database schema | `supabase/migrations/010_widget_schema.sql` — add new migration file for schema changes |

@@ -19,21 +19,31 @@ from engine.core.tools.confirm_booking_tool import confirm_booking
 from engine.core.tools.escalation_tool import escalate_to_human
 
 
-def build_tool_dispatch(db, client_config, phone_number: str, lead_time_days: int = 2) -> dict:
+def build_tool_dispatch(db, client_config, phone_number: str, lead_time_days: int = 2, appointment_windows: dict = None) -> dict:
     """
     Build the tool dispatch table for a single inbound message.
 
-    Injects db, client_config, phone_number, and lead_time_days into each tool
-    via closure so the agent_runner can call tools with only Claude-supplied args.
+    Injects db, client_config, phone_number, lead_time_days, and appointment_windows
+    into each tool via closure so the agent_runner can call tools with only Claude-supplied args.
 
     Args:
-        db:             Supabase async client for the client's DB.
-        client_config:  ClientConfig for the active client.
-        phone_number:   Inbound customer phone number.
-        lead_time_days: Minimum days in advance a booking must be made. Enforced
-                        as a hard guard in check_calendar_availability and write_booking.
+        db:                    Supabase async client for the client's DB.
+        client_config:         ClientConfig for the active client.
+        phone_number:          Inbound customer phone number.
+        lead_time_days:        Minimum days in advance a booking must be made. Enforced
+                               as a hard guard in check_calendar_availability and write_booking.
+        appointment_windows:   Dict with keys: am_start, am_end, pm_start, pm_end (time strings).
+                               If None, defaults to {"am_start": "09:00", "am_end": "13:00", ...}
     """
     from datetime import date as _date
+
+    if appointment_windows is None:
+        appointment_windows = {
+            "am_start": "09:00",
+            "am_end": "13:00",
+            "pm_start": "14:00",
+            "pm_end": "18:00",
+        }
 
     def _is_within_lead_time(slot_date_str: str) -> bool:
         try:
@@ -62,6 +72,7 @@ def build_tool_dispatch(db, client_config, phone_number: str, lead_time_days: in
             client_config=client_config,
             date=date,
             timezone=timezone,
+            appointment_windows=appointment_windows,
         )
 
     async def _write_booking(
@@ -72,6 +83,7 @@ def build_tool_dispatch(db, client_config, phone_number: str, lead_time_days: in
         postal_code: str,
         slot_date: str,
         slot_window: str,
+        service_brand: str | None = None,
         aircon_brand: str | None = None,
         notes: str | None = None,
     ) -> dict:
@@ -94,6 +106,7 @@ def build_tool_dispatch(db, client_config, phone_number: str, lead_time_days: in
             postal_code=postal_code,
             slot_date=slot_date,
             slot_window=slot_window,
+            service_brand=service_brand,
             aircon_brand=aircon_brand,
             notes=notes,
         )

@@ -11,6 +11,7 @@ This directory contains architecture documents for the Flow AI platform and clie
 - `address_schema_migration.md` — ADR: move `address` + `postal_code` from `customers` to `bookings`; three-phase migration plan with DDL, write_booking() change spec, rollback notes, and edge cases
 - `escalation_reset.md` — ADR + implementation spec for escalation reset via WhatsApp reply-to-message: `escalation_tracking` table, `send_message()` return type change, `reset_handler` module, human agent routing, keyword validation, audit trail
 - `telegram_alerts.md` — Internal Telegram alert bot: Tier 1 + Tier 2 alerting wiring, `send_telegram_alert()` public function, `api_incidents` schema extension (`source`, `context` columns), migration `005_observability_tables.sql`, message format templates, PII rules, no-op safety spec, dependency order
+- `widget_theming.md` — Widget appearance customization: per-client color + icon theming, server-side injection pattern (`window.FLOWAI_CONFIG`), runtime hover color derivation, validation/fallback strategy, ClientConfig extension, migration 009/010 DDL
 
 ### Source documents (read before producing architecture)
 - `clients/hey-aircon/plans/build/00_architecture_reference.md` — current n8n architecture (living reference)

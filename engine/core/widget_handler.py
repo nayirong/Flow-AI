@@ -17,7 +17,7 @@ from typing import Tuple
 
 from engine.config.client_config import load_client_config
 from engine.integrations.supabase_client import get_client_db
-from engine.core.context_builder import build_system_message
+from engine.core.context_builder import build_system_message, fetch_appointment_windows
 from engine.core.agent_runner import run_agent
 from engine.core.tools import build_tool_definitions, build_tool_dispatch
 
@@ -199,11 +199,13 @@ async def handle_widget_message(
     # 7. Build tool definitions and dispatch
     tool_definitions = build_tool_definitions(pending_booking=None)
     # Widget sessions don't have phone numbers; use session_id as identifier
+    appointment_windows = await fetch_appointment_windows(client_db)
     tool_dispatch = build_tool_dispatch(
         db=client_db,
         client_config=client_config,
         phone_number=session_id,  # Use session_id as identifier for tools
         lead_time_days=2,
+        appointment_windows=appointment_windows,
     )
 
     # 8. Call agent

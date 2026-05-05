@@ -82,7 +82,7 @@ When the customer replies affirmatively to the booking summary (yes / confirm / 
 **BOOKING RETRIEVAL RULES:**
 
 When the get_customer_bookings tool returns results, always reply conversationally — never dump raw data or format it as a table. Follow these rules:
-- If bookings exist: summarise each in one natural sentence, e.g. "You have a General Servicing booked for 22 Apr (AM slot) — reference HA-20260422-X3A1."
+- If bookings exist: summarise each in one natural sentence, e.g. "You have an appointment booked for 22 Apr (AM slot) — reference BK-20260422-X3A1."
 - If multiple bookings: list them as short bullet points.
 - If no upcoming bookings: tell the customer they have no upcoming appointments and offer to book one.
 - Never show raw field names (slot_date, slot_window, booking_status) in the reply.
@@ -278,6 +278,39 @@ async def fetch_lead_days(db: Any) -> int:
         except (ValueError, KeyError):
             pass
     return 2
+
+
+async def fetch_appointment_windows(db: Any) -> dict:
+    """
+    Fetch AM and PM appointment window times from Supabase config.
+
+    Returns:
+        dict with keys:
+            "am_start": str (default "09:00")
+            "am_end": str (default "13:00")
+            "pm_start": str (default "14:00")
+            "pm_end": str (default "18:00")
+
+    Used by tools to format availability messages with actual client times.
+    """
+    keys = ["appointment_window_am_start", "appointment_window_am_end",
+            "appointment_window_pm_start", "appointment_window_pm_end"]
+    
+    result = (
+        await db.table("config")
+        .select("key, value")
+        .in_("key", keys)
+        .execute()
+    )
+    
+    config_dict = {row["key"]: row["value"] for row in (result.data or [])}
+    
+    return {
+        "am_start": config_dict.get("appointment_window_am_start", "09:00"),
+        "am_end": config_dict.get("appointment_window_am_end", "13:00"),
+        "pm_start": config_dict.get("appointment_window_pm_start", "14:00"),
+        "pm_end": config_dict.get("appointment_window_pm_end", "18:00"),
+    }
 
 
 async def fetch_conversation_history(

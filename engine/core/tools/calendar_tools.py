@@ -14,6 +14,7 @@ async def check_calendar_availability(
     client_config,
     date: str,
     timezone: str = "Asia/Singapore",
+    appointment_windows: dict = None,
 ) -> dict:
     """
     Check AM and PM slot availability on a given date.
@@ -21,10 +22,12 @@ async def check_calendar_availability(
     Called by the agent before offering a customer an appointment slot.
 
     Args:
-        client_config: ClientConfig with google_calendar_creds + google_calendar_id.
-                       Injected via closure — not passed by Claude.
-        date:          Date to check in YYYY-MM-DD format.
-        timezone:      Timezone string (default Asia/Singapore).
+        client_config:         ClientConfig with google_calendar_creds + google_calendar_id.
+                               Injected via closure — not passed by Claude.
+        date:                  Date to check in YYYY-MM-DD format.
+        timezone:              Timezone string (default Asia/Singapore).
+        appointment_windows:   Dict with keys: am_start, am_end, pm_start, pm_end (time strings).
+                               If None, defaults to standard times.
 
     Returns:
         dict: {date, am_available, pm_available, message}
@@ -32,6 +35,26 @@ async def check_calendar_availability(
 
     Never raises — on error returns both slots as unavailable with an error flag.
     """
+    if appointment_windows is None:
+        appointment_windows = {
+            "am_start": "09:00",
+            "am_end": "13:00",
+            "pm_start": "14:00",
+            "pm_end": "18:00",
+        }
+
+    # Format time window strings for user messages (e.g., "09:00" -> "9am", "13:00" -> "1pm")
+    def format_time(time_str: str) -> str:
+        try:
+            hour = int(time_str.split(":")[0])
+            suffix = "am" if hour < 12 else "pm"
+            hour_12 = hour if hour <= 12 else hour - 12
+            return f"{hour_12}{suffix}"
+        except (ValueError, IndexError):
+            return time_str
+
+    am_display = f"{format_time(appointment_windows['am_start'])}–{format_time(appointment_windows['am_end'])}"
+    pm_display = f"{format_time(appointment_windows['pm_start'])}–{format_time(appointment_windows['pm_end'])}"
     if not client_config.google_calendar_creds or not client_config.google_calendar_id:
         logger.warning(
             f"Google Calendar not configured for client {client_config.client_id} "
@@ -41,7 +64,7 @@ async def check_calendar_availability(
             "date": date,
             "am_available": True,
             "pm_available": True,
-            "message": f"Both AM (9am–1pm) and PM (2pm–6pm) slots appear available on {date}.",
+            "message": f"Both AM ({am_display}) and PM ({pm_display}) slots appear available on {date}.",
         }
 
     try:
@@ -59,17 +82,17 @@ async def check_calendar_availability(
 
         if am and pm:
             message = (
-                f"Both the AM slot (9am–1pm) and PM slot (2pm–6pm) "
+                f"Both the AM slot ({am_display}) and PM slot ({pm_display}) "
                 f"are available on {date}. Please offer both options to the customer."
             )
         elif am:
             message = (
-                f"Only the AM slot (9am–1pm) is available on {date}. "
+                f"Only the AM slot ({am_display}) is available on {date}. "
                 f"The PM slot is already taken."
             )
         elif pm:
             message = (
-                f"Only the PM slot (2pm–6pm) is available on {date}. "
+                f"Only the PM slot ({pm_display}) is available on {date}. "
                 f"The AM slot is already taken."
             )
         else:

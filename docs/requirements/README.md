@@ -13,6 +13,8 @@ This directory contains formal requirements documents produced by the product-ma
 | Proactive Follow-up Flow | [proactive_followup.md](proactive_followup.md) | Draft — Pending Founder Approval | 2026-04-22 |
 | Escalation Reset via WhatsApp Reply | [escalation_reset.md](escalation_reset.md) | Draft — Pending Founder Approval | 2026-04-22 |
 | Internal Telegram Alert Bot | [telegram_alerts.md](telegram_alerts.md) | Draft — Pending Founder Approval | 2026-04-22 |
+| Embeddable Chat Widget — Phase 1 MVP | [chat_widget.md](chat_widget.md) | Draft — Awaiting Architect Review | 2026-04-28 |
+| Widget Theming (Per-Client Color & Icon) | [widget_theming.md](widget_theming.md) | Draft — Pending Founder Approval | 2026-05-02 |
 | HeyAircon Phase 1 | `hey-aircon-requirements.md` | To-do | — |
 | Package Awareness (WhatsApp Agent) | [REQ-package-awareness.md](REQ-package-awareness.md) | Parked — decision-complete, awaiting Phase 1 delivery | 2026-04-20 |
 

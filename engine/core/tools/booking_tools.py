@@ -72,9 +72,17 @@ async def _alert_booking_failure(
         logger.error(f"Failed to send booking failure alert: {e}", exc_info=True)
 
 
-def _generate_booking_id(slot_date: str) -> str:
+def _normalize_booking_prefix(client_id: str) -> str:
+    """Generate a stable 2-4 char uppercase booking prefix from client_id."""
+    cleaned = "".join(ch for ch in (client_id or "") if ch.isalnum()).upper()
+    if not cleaned:
+        return "BK"
+    return cleaned[:4]
+
+
+def _generate_booking_id(slot_date: str, client_id: str = "") -> str:
     """
-    Generate a booking ID in the format HA-YYYYMMDD-XXXX.
+    Generate a booking ID in the format <PREFIX>-YYYYMMDD-XXXX.
 
     The 4-char suffix is random alphanumeric (uppercase).
     This is safe for Phase 1 volumes — revisit if collision risk grows.
@@ -83,11 +91,12 @@ def _generate_booking_id(slot_date: str) -> str:
         slot_date: Date string in YYYY-MM-DD format.
 
     Returns:
-        e.g. "HA-20260430-A3F2"
+        e.g. "FLOW-20260430-A3F2"
     """
     date_compact = slot_date.replace("-", "")
     suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"HA-{date_compact}-{suffix}"
+    prefix = _normalize_booking_prefix(client_id)
+    return f"{prefix}-{date_compact}-{suffix}"
 
 
 async def write_booking(
@@ -101,6 +110,7 @@ async def write_booking(
     postal_code: str,
     slot_date: str,
     slot_window: str,
+    service_brand: Optional[str] = None,
     aircon_brand: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> dict:
@@ -117,13 +127,14 @@ async def write_booking(
         client_config: ClientConfig with calendar + DB credentials (injected).
         phone_number:  Customer phone number (injected).
         customer_name: Customer's full name.
-        service_type:  Aircon service type.
-        unit_count:    Number of aircon units.
+        service_type:  Service type.
+        unit_count:    Service quantity/count.
         address:       Service address.
         postal_code:   6-digit Singapore postal code.
         slot_date:     Booking date in YYYY-MM-DD format.
         slot_window:   "AM" or "PM".
-        aircon_brand:  Optional aircon brand.
+        service_brand: Optional brand if relevant to the service.
+        aircon_brand:  Legacy alias for service_brand (backward compatibility).
         notes:         Optional free-text notes.
 
     Returns:
@@ -142,7 +153,7 @@ async def write_booking(
             "The agent must collect address from the customer before calling this tool."
         )
 
-    booking_id = _generate_booking_id(slot_date)
+    booking_id = _generate_booking_id(slot_date, client_config.client_id)
 
     # ── INSERT booking row with pending_confirmation status ───────────────────────
     # Note: customer_name is NOT a column in the bookings table — it lives in
@@ -163,9 +174,11 @@ async def write_booking(
         "created_at": _created_at,
     }
     db_booking_row = {k: v for k, v in booking_row.items() if k != "customer_name"}
-    if aircon_brand:
-        booking_row["aircon_brand"] = aircon_brand
-        db_booking_row["aircon_brand"] = aircon_brand
+    brand_value = service_brand or aircon_brand
+    if brand_value:
+        # Keep DB column name for compatibility with existing schema.
+        booking_row["aircon_brand"] = brand_value
+        db_booking_row["aircon_brand"] = brand_value
     if notes:
         booking_row["notes"] = notes
         db_booking_row["notes"] = notes

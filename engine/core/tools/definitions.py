@@ -1,5 +1,5 @@
 """
-Anthropic-format tool definitions for the HeyAircon agent.
+Anthropic-format tool definitions for the platform agent.
 
 Tools are split into named constants so message_handler can compose a
 phase-appropriate tool list per request:
@@ -21,10 +21,11 @@ Format: Anthropic tools API (https://docs.anthropic.com/en/docs/tool-use)
 _CHECK_CALENDAR_TOOL: dict = {
     "name": "check_calendar_availability",
     "description": (
-        "Check whether the AM slot (9am–1pm) and/or PM slot (2pm–6pm) are available "
-        "on a given date. Only call this AFTER you have confirmed ALL required booking "
+        "Check whether the AM and PM slots are available on a given date. "
+        "Only call this AFTER you have confirmed ALL required booking "
         "fields from the customer: service type, number of units, full address, and "
         "postal code. Do not call this if any required booking field is still unknown. "
+        "Specific times for each slot are in the APPOINTMENT WINDOWS section of your instructions. "
         "Returns availability status and a human-readable summary message."
     ),
     "input_schema": {
@@ -34,7 +35,7 @@ _CHECK_CALENDAR_TOOL: dict = {
                 "type": "string",
                 "description": (
                     "Date to check in YYYY-MM-DD format. "
-                    "Must be at least 2 days from today (booking lead time)."
+                    "Must respect the minimum booking lead time (see APPOINTMENT WINDOWS in instructions)."
                 ),
             },
             "timezone": {
@@ -67,13 +68,13 @@ _WRITE_BOOKING_TOOL: dict = {
             "service_type": {
                 "type": "string",
                 "description": (
-                    "Type of aircon service. One of: General Servicing, "
-                    "Chemical Wash, Chemical Overhaul, Gas Top Up, Aircon Repair."
+                    "Type of service requested by the customer, based on the active "
+                    "client's configured service catalog."
                 ),
             },
             "unit_count": {
                 "type": "string",
-                "description": "Number of aircon units to service (e.g. '2').",
+                "description": "Quantity associated with the service (e.g. '2').",
             },
             "address": {
                 "type": "string",
@@ -90,11 +91,11 @@ _WRITE_BOOKING_TOOL: dict = {
             "slot_window": {
                 "type": "string",
                 "enum": ["AM", "PM"],
-                "description": "AM (9am–1pm) or PM (2pm–6pm).",
+                "description": "AM or PM slot. Specific times are in the APPOINTMENT WINDOWS section of your instructions.",
             },
-            "aircon_brand": {
+            "service_brand": {
                 "type": "string",
-                "description": "Optional. Aircon brand (e.g. Daikin, Mitsubishi).",
+                "description": "Optional. Brand information if relevant to the service.",
             },
             "notes": {
                 "type": "string",
@@ -130,7 +131,7 @@ _CONFIRM_BOOKING_TOOL: dict = {
             "booking_id": {
                 "type": "string",
                 "description": (
-                    "The booking ID from the PENDING BOOKING context (format: HA-YYYYMMDD-XXXX). "
+                    "The booking ID from the PENDING BOOKING context. "
                     "Use the exact ID provided — do not guess or fabricate it."
                 ),
             },

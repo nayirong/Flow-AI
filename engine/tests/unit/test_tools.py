@@ -16,7 +16,7 @@ def _make_client_config(
     human_agent_number: str = "6590000001",
 ) -> MagicMock:
     cfg = MagicMock()
-    cfg.client_id = "hey-aircon"
+    cfg.client_id = "test"  # Generic test client (produces TEST- prefix)
     cfg.human_agent_number = human_agent_number
     cfg.meta_phone_number_id = "123456789"
     cfg.meta_whatsapp_token = "test_token"
@@ -140,8 +140,8 @@ async def test_write_booking_inserts_row_and_updates_customer():
     )
 
     assert result["status"] == "pending_confirmation"
-    assert result["booking_id"].startswith("HA-20260501-")
-    assert len(result["booking_id"]) == len("HA-20260501-XXXX")
+    assert result["booking_id"].startswith("TEST-20260501-")
+    assert len(result["booking_id"]) == len("TEST-20260501-XXXX")
 
     # bookings + customers tables both touched
     table_names = [call[0][0] for call in db.table.call_args_list]
@@ -278,16 +278,16 @@ async def test_write_booking_no_calendar_succeeds():
     )
 
     assert result["status"] == "pending_confirmation"
-    assert result["booking_id"].startswith("HA-20260502-")
+    assert result["booking_id"].startswith("TEST-20260502-")
 
 
 def test_generate_booking_id_format():
-    """Booking ID must match HA-YYYYMMDD-XXXX format."""
+    """Booking ID must match BK-YYYYMMDD-XXXX format by default."""
     from engine.core.tools.booking_tools import _generate_booking_id
 
     bid = _generate_booking_id("2026-05-01")
-    assert bid.startswith("HA-20260501-")
-    assert len(bid) == 16  # "HA-" + 8 + "-" + 4
+    assert bid.startswith("BK-20260501-")
+    assert len(bid) == 16  # "BK-" + 8 + "-" + 4
 
 
 # ── get_customer_bookings ──────────────────────────────────────────────────────

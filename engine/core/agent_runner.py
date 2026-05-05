@@ -613,7 +613,7 @@ async def run_agent(
                             "If check_calendar_availability already confirmed the customer's requested slot is available, "
                             "that already counts as agreement for write_booking. Do NOT ask for a second confirmation before write_booking. "
                             "(1) The ONLY required fields for write_booking are: customer_name, service_type, "
-                            "unit_count, address, postal_code, slot_date, slot_window. BTU size, aircon brand, "
+                            "unit_count, address, postal_code, slot_date, slot_window. Optional technical details and brand/model info "
                             "and other optional details are NOT required — do not block on them. "
                             "If you have all 7 required fields, call write_booking immediately. "
                             "CRITICAL: Use the EXACT slot_window (AM or PM) that the customer most recently stated. "
