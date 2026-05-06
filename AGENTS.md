@@ -1,7 +1,7 @@
 # AGENTS.md — Flow AI Master Agent Index
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-23
+> Last Updated: 2026-05-06
 
 ---
 
@@ -90,7 +90,7 @@ Vertical AI agent platform for SEA service SMEs. WhatsApp + website automation. 
 | n8n → Python orchestration engine (planned) | Decided 2026-04-15 — finish n8n D/E first, then build Python in parallel |
 | Client config isolation: hybrid approach | Decided 2026-04-15 — non-sensitive fields in Supabase `clients` table; 5 secrets in Railway env vars (namespaced): `meta_whatsapp_token`, `supabase_url`, `supabase_service_key`, `anthropic_api_key`, `openai_api_key`. LLM keys per-client (each client billed on their own accounts). Migrate to secrets manager at 10–20 clients. |
 | Monorepo | Decided 2026-04-15 — single repo; split before client 3 |
-| Railway deployment model | Decided 2026-04-18 — Option A: one Railway project per client, all connected to same repo. Each project tracks `release` branch (not `main`) so deploys are explicit and per-client. Adding a client = new Railway project + 3 env vars + 1 Supabase row. |
+| Railway deployment model | Decided 2026-04-18, updated 2026-05-06 — Option B: one Railway project per client with per-client deploy branches. `master` branch is for development only (no Railway project tracks it). Each client gets a `deploy/{client-id}` branch tracked by their Railway project. Allows staging on `master`, then explicit per-client promotion. Adding a client = new Railway project + create `deploy/{client-id}` branch + point Railway to that branch + add 5 env vars + INSERT into shared `clients` table. The old `release` branch is deprecated. |
 | Google Sheets sync — Core, not bespoke | Decided 2026-04-20 — Post-write sync to external visibility layer is a portable platform pattern. Lives in `integrations/google_sheets.py`. Config flags (`sheets_sync_enabled`, `sheets_spreadsheet_id`) in `clients` table. Sheets failure is fire-and-forget — never rolls back Supabase write. Phase 2 will replace Sheets with dashboard; sync layer must not block that migration. Tables synced: `customers` + `bookings` only (`interactions_log` excluded). |
 | Escalation reset mechanism | Decided 2026-04-22 — Reply-to-message + keyword matching ("done"/"resolved"/"ok" etc.) implemented in `reset_handler.py`. WhatsApp label-based reset rejected — Meta does not send webhook events for label removal. Human agent replies to escalation alert → agent detects `context_message_id` → matches keywords → clears `escalation_flag` + marks `resolved_at` in `escalation_tracking`. |
 | Escalation holding reply — once only | Decided 2026-04-22 — `escalation_notified` column controls holding reply state. First inbound from escalated customer → send holding reply once + flip `escalation_notified=True`. Subsequent inbound → silently dropped (no reply, no agent call). On reset → `escalation_notified` reset to `False` for re-escalation. Prevents message spam to escalated customers. |

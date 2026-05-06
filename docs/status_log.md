@@ -1,7 +1,7 @@
 # Flow AI — Project Status Log
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-04-28
+> Last Updated: 2026-05-06
 
 ---
 
@@ -88,6 +88,7 @@
 
 | Date | Phase | Description | Status |
 |------|-------|-------------|--------|
+| 2026-05-06 | Infrastructure | Deployment model changed from single `release` branch to per-client `deploy/{client-id}` branches. Reason: single `release` branch deployed to all clients simultaneously, creating risk of cross-client impact. New model: `master` for development, `deploy/hey-aircon` tracked by hey-aircon Railway project, `deploy/flow-ai` tracked by flow-ai Railway project. Promotion: `git push origin master:deploy/{client-id}`. Old `release` branch deprecated. | Complete |
 | 2026-04-28 | Status Review | Chief-of-staff status review: All migration gates cleared (48h verification passed, calendar working). Two critical bugs identified: (1) guardrail re-prompt leaking to customers, (2) booking_count not incrementing on first booking. Rescheduling & cancellation feature evaluation complete — classified as **Core**, requires Calendar Write Rules policy change (add modify/delete capability). Awaiting direction frame confirmation before dispatching `@product-manager`. | In Progress |
 | 2026-04-24 | Client Report | HeyAircon client-facing status report generated. Content drafted by chief-of-staff; file write delegated to `@sdet-engineer` → `docs/client-reports/heyaircon_status_2026-04-24.md`. | Complete |
 | 2026-04-24 | Post-mortem | Slice 2 booking confirmation + Railway deployment isolation + escalation reset fallback + Sheets row key fix — 4 rework clusters, 20 commits | Complete |

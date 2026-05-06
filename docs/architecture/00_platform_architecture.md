@@ -845,7 +845,7 @@ Returns `{"status": "ok"}` with HTTP 200.
 
 Configure Railway health check path to `/health`.
 
-### Deployment status (as of 2026-04-19)
+### Deployment status (as of 2026-05-06)
 
 The `flow-engine` service is live in production on Railway. Meta webhook is pointed at:
 
@@ -853,7 +853,32 @@ The `flow-engine` service is live in production on Railway. Meta webhook is poin
 https://flow-ai-production-9296.up.railway.app/webhook/whatsapp/hey-aircon
 ```
 
-Railway deployment uses Option A: one Railway project per client, single monorepo. All Railway projects track the `release` branch. Promote to release with `git push origin main:release`.
+**Deployment model (updated 2026-05-06):** Option B — per-client deploy branches.
+
+- `master` branch — development only, no Railway project tracks this
+- `deploy/hey-aircon` branch — tracked by hey-aircon Railway project
+- `deploy/flow-ai` branch — tracked by flow-ai Railway project
+- Each new client gets their own `deploy/{client-id}` branch
+
+**Promotion commands:**
+```bash
+# Deploy to flow-ai only
+git push origin master:deploy/flow-ai
+
+# Deploy to hey-aircon only
+git push origin master:deploy/hey-aircon
+
+# Deploy to both
+git push origin master:deploy/flow-ai master:deploy/hey-aircon
+```
+
+The old `release` branch still exists on remote but is no longer tracked by any Railway project and is deprecated.
+
+**Adding a new client:**
+1. INSERT into shared `clients` Supabase table
+2. Add 5 Railway env vars (`{CLIENT_ID_UPPER}_META_WHATSAPP_TOKEN`, `_SUPABASE_URL`, `_SUPABASE_SERVICE_KEY`, `_ANTHROPIC_API_KEY`, `_OPENAI_API_KEY`)
+3. Create Railway project + point it to a new `deploy/{client-id}` branch
+4. Create the deploy branch: `git checkout -b deploy/{client-id} && git push origin deploy/{client-id}`
 
 n8n (`n8n` + `n8n-worker` services) is still running but decommission is pending completion of the 48h verification window and resolution of the Google Calendar service account access issue. n8n is not receiving Meta webhooks — the webhook URL is pointed at `flow-engine`.
 

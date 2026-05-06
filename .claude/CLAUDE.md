@@ -71,7 +71,7 @@ The engine is client-agnostic. Client config is loaded at runtime by `client_id`
 - Cache `clients` table lookups in-process (5-min TTL minimum) — shared config DB cannot be a per-request dependency
 - Migration path: move secrets to a secrets manager (AWS/GCP) at 10–20 clients
 
-Adding a new client = INSERT into `clients` table + add 5 env vars to Railway. No engine changes. No redeploy for non-secret config updates.
+Adding a new client = INSERT into `clients` table + add 5 env vars to Railway + create `deploy/{client-id}` branch + point Railway project to that branch. No engine changes. No redeploy for non-secret config updates.
 
 ### Escalation gate
 The escalation gate (`customers.escalation_flag`) is a hard programmatic check that runs before the agent. If true: send holding reply, log, stop. The agent never decides whether it is escalated. This is not configurable.
@@ -201,20 +201,27 @@ Nothing inside `engine/core/` imports from `clients/`. Dependency is one-directi
 
 ---
 
-## Railway Deployment Model (decided 2026-04-18)
+## Railway Deployment Model (decided 2026-04-18, updated 2026-05-06)
 
-**Option A — one Railway project per client, single monorepo.**
+**Option B — per-client deploy branches.**
 
 - One Railway account hosts N projects (no per-client account needed).
 - Each client = one Railway project with its own service, env vars, and deploy history.
 - All Railway projects connect to the same GitHub repo (`flow-ai`).
 - **5 env vars per client:** `{CLIENT_ID_UPPER}_META_WHATSAPP_TOKEN`, `_SUPABASE_URL`, `_SUPABASE_SERVICE_KEY`, `_ANTHROPIC_API_KEY`, `_OPENAI_API_KEY`
-- **Branch strategy:** each Railway project tracks the `release` branch, not `main`. Promotes to release when ready — controls blast radius.
-  - Develop/merge freely on `main`.
-  - `git push origin main:release` when ready to deploy to all active clients.
-  - Can deploy to one client first (update that project's branch to a feature branch) before promoting to all.
-- Adding a new client = create Railway project + add 3 env vars (`{CLIENT_ID_UPPER}_META_WHATSAPP_TOKEN`, `_SUPABASE_URL`, `_SUPABASE_SERVICE_KEY`) + INSERT into shared `clients` table. No engine changes.
-- Switch to manual deploy (Railway toggle) if stricter per-client rollout control is needed at scale.
+- **Branch strategy:** each Railway project tracks its own `deploy/{client-id}` branch, not a shared `release` branch.
+  - `master` branch — development only, no Railway project tracks this
+  - `deploy/hey-aircon` branch — tracked by hey-aircon Railway project
+  - `deploy/flow-ai` branch — tracked by flow-ai Railway project
+  - Each new client gets their own `deploy/{client-id}` branch
+  - Develop/merge freely on `master`.
+  - Promote to specific clients when ready:
+    - `git push origin master:deploy/flow-ai` — deploy to flow-ai only
+    - `git push origin master:deploy/hey-aircon` — deploy to hey-aircon only
+    - `git push origin master:deploy/flow-ai master:deploy/hey-aircon` — deploy to both
+- **Why the change (2026-05-06):** The old single `release` branch caused all clients to be deployed simultaneously. With two active clients (hey-aircon and flow-ai), this was a risk — changes intended for one client could accidentally affect the other. The new model allows staging on `master`, then explicitly promoting to each client when ready.
+- **Adding a new client:** create Railway project + create `deploy/{client-id}` branch (`git checkout -b deploy/{client-id} && git push origin deploy/{client-id}`) + point Railway to that branch + add 5 env vars (`{CLIENT_ID_UPPER}_META_WHATSAPP_TOKEN`, `_SUPABASE_URL`, `_SUPABASE_SERVICE_KEY`, `_ANTHROPIC_API_KEY`, `_OPENAI_API_KEY`) + INSERT into shared `clients` table. No engine changes.
+- The old `release` branch still exists on remote but is no longer tracked by any Railway project and is deprecated.
 
 ---
 
