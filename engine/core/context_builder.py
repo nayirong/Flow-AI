@@ -60,7 +60,7 @@ Step 5: Send the customer this EXACT summary format:
   "Here's your booking summary:
   📋 Service: {service_type}
   📅 Date: {slot_date}
-  🕐 Time: {slot_window} slot (9am–1pm for AM / 2pm–6pm for PM)
+  🕐 Time: {slot_window} slot
   📍 Address: {address}, Singapore {postal_code}
   Please reply *yes* to confirm your appointment."
 Step 6: Wait for the customer to reply. If they say yes (or any affirmative), call confirm_booking with the booking_id from Step 4.
