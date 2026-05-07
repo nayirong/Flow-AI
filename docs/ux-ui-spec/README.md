@@ -3,8 +3,12 @@
 
 This directory contains UX/UI specifications for client-facing and internal interfaces.
 
-### Current status
-Not required for Phase 1 (WhatsApp agent has no user-facing UI). Relevant when CRM dashboard build begins (Phase 2).
+### Current files
+
+| File | Status | Description |
+|---|---|---|
+| `brand-palette.md` | Complete | Official color tokens — confirmed 2026-05-02 |
+| `widget_formatting_spec.md` | Complete | Chat widget message rendering, markdown handling, typing indicator, accessibility fixes |
 
 ### Expected files (Phase 2)
 - `crm-dashboard-spec.md` — layout, flows, component specs for client CRM interface
