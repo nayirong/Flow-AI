@@ -4,7 +4,7 @@
  */
 (function() {
   'use strict';
-  
+
   // ── Config ─────────────────────────────────────────────────────────────────
   const _cfg = window.FLOWAI_CONFIG || {};
   const CLIENT_ID = _cfg.clientId || '';
@@ -20,14 +20,14 @@
     return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
   }
   const HOVER_COLOR = _darkenColor(PRIMARY_COLOR, 10);
-  
+
   // Derive base URL from script src
   const _scriptSrc = document.currentScript ? document.currentScript.src : '';
   const BASE_URL = _scriptSrc ? _scriptSrc.replace(/\/widget\/[^/]+\.js.*$/, '') : '';
-  
+
   let sessionId = null;
   let isOpen = false;
-  
+
   // ── Styles ─────────────────────────────────────────────────────────────────
   function injectStyles() {
     const style = document.createElement('style');
@@ -89,6 +89,10 @@
         width: 24px;
         height: 24px;
       }
+      #flowai-widget-close:focus-visible {
+        outline: 2px solid white;
+        outline-offset: 2px;
+      }
       #flowai-prechat-form {
         padding: 24px;
         display: flex;
@@ -121,6 +125,10 @@
       #flowai-start-chat:hover {
         background: ${HOVER_COLOR};
       }
+      #flowai-start-chat:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       #flowai-chat-body {
         display: flex;
         flex-direction: column;
@@ -152,6 +160,28 @@
         align-self: flex-start;
         background: #F3F4F6;
         color: #111;
+        max-width: 85%;
+      }
+      .flowai-message-agent p {
+        margin: 0 0 8px 0;
+      }
+      .flowai-message-agent p:last-child {
+        margin-bottom: 0;
+      }
+      .flowai-message-agent ul,
+      .flowai-message-agent ol {
+        margin: 4px 0 8px 0;
+        padding-left: 18px;
+      }
+      .flowai-message-agent li {
+        margin-bottom: 4px;
+        line-height: 1.5;
+      }
+      .flowai-message-agent strong {
+        font-weight: 600;
+      }
+      .flowai-message-agent em {
+        font-style: italic;
       }
       .flowai-message-error {
         align-self: center;
@@ -169,6 +199,38 @@
         max-width: 90%;
         text-align: center;
       }
+      .flowai-typing-indicator {
+        align-self: flex-start;
+        background: #F3F4F6;
+        color: #111;
+        padding: 10px 14px;
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .flowai-typing-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #9CA3AF;
+        display: inline-block;
+      }
+      @keyframes flowai-dot-bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .flowai-typing-dot {
+          animation: flowai-dot-bounce 0.6s ease-in-out infinite;
+        }
+        .flowai-typing-dot:nth-child(2) {
+          animation-delay: 0.15s;
+        }
+        .flowai-typing-dot:nth-child(3) {
+          animation-delay: 0.30s;
+        }
+      }
       #flowai-input-row {
         display: flex;
         gap: 8px;
@@ -181,6 +243,12 @@
         border: 1px solid #ddd;
         border-radius: 6px;
         font-size: 14px;
+      }
+      #flowai-message-input:focus,
+      #flowai-prechat-form input:focus {
+        outline: 2px solid #1B5E3F;
+        outline-offset: 0px;
+        border-color: #1B5E3F;
       }
       #flowai-send-btn {
         background: ${PRIMARY_COLOR};
@@ -195,15 +263,19 @@
       #flowai-send-btn:hover {
         background: ${HOVER_COLOR};
       }
+      #flowai-send-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
     `;
     document.head.appendChild(style);
   }
-  
+
   // ── DOM injection ──────────────────────────────────────────────────────────
   function injectHTML() {
     const container = document.createElement('div');
     container.innerHTML = `
-      <div id="flowai-widget-btn">${BUTTON_ICON}</div>
+      <div id="flowai-widget-btn" aria-label="Open chat">${BUTTON_ICON}</div>
       <div id="flowai-widget-window" style="display:none">
         <div id="flowai-widget-header">
           <span id="flowai-widget-title">Assistant</span>
@@ -217,7 +289,7 @@
           <button id="flowai-start-chat">Start Chat</button>
         </div>
         <div id="flowai-chat-body" style="display:none">
-          <div id="flowai-messages"></div>
+          <div id="flowai-messages" aria-live="polite" aria-atomic="false"></div>
           <div id="flowai-input-row">
             <input type="text" id="flowai-message-input" placeholder="Type a message..." />
             <button id="flowai-send-btn">Send</button>
@@ -227,7 +299,103 @@
     `;
     document.body.appendChild(container);
   }
-  
+
+  // ── Markdown parser ────────────────────────────────────────────────────────
+  function parseMarkdown(text) {
+    // Step 1: HTML-escape raw input before any transformation
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+    // Step 1.5: Convert inline ✅ section markers into paragraph breaks
+    // The LLM uses " ✅ " as a visual section separator on a single line.
+    // Splitting here lets the paragraph processor handle each section independently.
+    const withSections = escaped.replace(/ ✅ /g, '\n\n✅ ');
+
+    // Step 2: Apply inline formatting transforms to a text segment
+    function applyInline(segment) {
+      return segment
+        // Bold: **text** — must come before italic to avoid partial matches
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        // Italic: *text* (single asterisk, not preceded or followed by another asterisk)
+        .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    }
+
+    // Step 3: Split on paragraph boundaries (\n\n), then process each paragraph block
+    const paragraphBlocks = withSections.split(/\n\n+/);
+    const outputParts = [];
+
+    paragraphBlocks.forEach(function(block) {
+      if (!block.trim()) return;
+
+      // Split block into individual lines (single \n)
+      const lines = block.split('\n');
+      const listItems = [];
+      const paraLines = [];
+
+      // Helper: flush accumulated paragraph lines as a <p>
+      function flushPara() {
+        if (paraLines.length === 0) return;
+        const content = paraLines.map(applyInline).join('<br>');
+        outputParts.push('<p>' + content + '</p>');
+        paraLines.length = 0;
+      }
+
+      // Helper: flush accumulated list items as a <ul>
+      function flushList() {
+        if (listItems.length === 0) return;
+        const lis = listItems.map(function(item) {
+          return '<li>' + applyInline(item.trim()) + '</li>';
+        }).join('');
+        outputParts.push('<ul>' + lis + '</ul>');
+        listItems.length = 0;
+      }
+
+      lines.forEach(function(line) {
+        // Check for explicit list-item lines (start with "- " or "* ")
+        if (/^[-*] /.test(line)) {
+          flushPara();
+          listItems.push(line.replace(/^[-*] /, ''));
+          return;
+        }
+
+        // Check for inline bullet segments: line contains " - " but does not start with "- "
+        // Split on " - " to extract a leading paragraph segment and trailing list items
+        if (line.indexOf(' - ') !== -1) {
+          const segments = line.split(' - ');
+          // segments[0] is paragraph text; segments[1..n] are list items
+          const leadText = segments[0].trim();
+          const bulletSegments = segments.slice(1);
+
+          if (leadText) {
+            flushList();
+            paraLines.push(leadText);
+            flushPara();
+          }
+
+          bulletSegments.forEach(function(seg) {
+            if (seg.trim()) {
+              listItems.push(seg.trim());
+            }
+          });
+          return;
+        }
+
+        // Plain line — flush any pending list, accumulate as paragraph text
+        flushList();
+        paraLines.push(line);
+      });
+
+      // Flush any remaining accumulated content
+      flushList();
+      flushPara();
+    });
+
+    return outputParts.join('');
+  }
+
   // ── Session management ─────────────────────────────────────────────────────
   async function initSession() {
     const stored = localStorage.getItem(SESSION_KEY);
@@ -241,13 +409,13 @@
       showPrechatForm();
     }
   }
-  
+
   async function createSession(name, email, phone) {
     const body = {};
     if (name) body.name = name;
     if (email) body.email = email;
     if (phone) body.phone = phone;
-    
+
     const res = await fetch(`${BASE_URL}/chat/${CLIENT_ID}/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -256,7 +424,7 @@
     if (!res.ok) throw new Error('Failed to create session');
     return res.json();
   }
-  
+
   async function restoreSession(sid) {
     try {
       const res = await fetch(`${BASE_URL}/chat/${CLIENT_ID}/history?session_id=${encodeURIComponent(sid)}`, {
@@ -276,11 +444,18 @@
       return false;
     }
   }
-  
+
   async function sendMessage(text) {
     if (!sessionId || !text.trim()) return;
     appendMessage('user', text);
-    
+
+    const sendBtn = document.getElementById('flowai-send-btn');
+    const msgInput = document.getElementById('flowai-message-input');
+    sendBtn.disabled = true;
+    msgInput.disabled = true;
+
+    showTypingIndicator();
+
     try {
       const res = await fetch(`${BASE_URL}/chat/${CLIENT_ID}/message`, {
         method: 'POST',
@@ -289,25 +464,34 @@
       });
       if (!res.ok) throw new Error('Request failed');
       const data = await res.json();
+      hideTypingIndicator();
       appendMessage('agent', data.reply);
       if (data.escalated) {
         appendNotice('This conversation has been escalated to our team. We\'ll be in touch shortly.');
       }
     } catch (e) {
+      hideTypingIndicator();
       appendMessage('error', 'Sorry, something went wrong. Please try again.');
+    } finally {
+      sendBtn.disabled = false;
+      msgInput.disabled = false;
     }
   }
-  
+
   // ── UI helpers ─────────────────────────────────────────────────────────────
   function appendMessage(role, text) {
     const messagesDiv = document.getElementById('flowai-messages');
     const msgDiv = document.createElement('div');
     msgDiv.className = 'flowai-message flowai-message-' + role;
-    msgDiv.textContent = text;
+    if (role === 'agent') {
+      msgDiv.innerHTML = parseMarkdown(text);
+    } else {
+      msgDiv.textContent = text;
+    }
     messagesDiv.appendChild(msgDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
   }
-  
+
   function appendNotice(text) {
     const messagesDiv = document.getElementById('flowai-messages');
     const noticeDiv = document.createElement('div');
@@ -316,32 +500,67 @@
     messagesDiv.appendChild(noticeDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
   }
-  
+
+  function showTypingIndicator() {
+    const messagesDiv = document.getElementById('flowai-messages');
+    const indicator = document.createElement('div');
+    indicator.id = 'flowai-typing-indicator';
+    indicator.className = 'flowai-typing-indicator';
+    indicator.setAttribute('role', 'status');
+    indicator.setAttribute('aria-label', 'Agent is typing');
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElement('span');
+      dot.className = 'flowai-typing-dot';
+      indicator.appendChild(dot);
+    }
+    messagesDiv.appendChild(indicator);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  function hideTypingIndicator() {
+    const indicator = document.getElementById('flowai-typing-indicator');
+    if (indicator) {
+      indicator.parentNode.removeChild(indicator);
+    }
+  }
+
   function showPrechatForm() {
     document.getElementById('flowai-prechat-form').style.display = 'flex';
     document.getElementById('flowai-chat-body').style.display = 'none';
   }
-  
+
   function showChatBody() {
     document.getElementById('flowai-prechat-form').style.display = 'none';
     document.getElementById('flowai-chat-body').style.display = 'flex';
   }
-  
+
   function toggleWidget() {
     isOpen = !isOpen;
-    const window = document.getElementById('flowai-widget-window');
-    window.style.display = isOpen ? 'flex' : 'none';
+    const widgetWindow = document.getElementById('flowai-widget-window');
+    widgetWindow.style.display = isOpen ? 'flex' : 'none';
+    const launcherBtn = document.getElementById('flowai-widget-btn');
+    launcherBtn.setAttribute('aria-label', isOpen ? 'Close chat' : 'Open chat');
   }
-  
+
   // ── Event wiring ───────────────────────────────────────────────────────────
   function wireEvents() {
     document.getElementById('flowai-widget-btn').addEventListener('click', toggleWidget);
     document.getElementById('flowai-widget-close').addEventListener('click', toggleWidget);
-    
+
     document.getElementById('flowai-start-chat').addEventListener('click', async () => {
       const name = document.getElementById('flowai-name').value;
       const email = document.getElementById('flowai-email').value;
       const phone = document.getElementById('flowai-phone').value;
+      const startBtn = document.getElementById('flowai-start-chat');
+      const form = document.getElementById('flowai-prechat-form');
+
+      // Clear any previous inline error
+      const prevError = form.querySelector('.flowai-prechat-error');
+      if (prevError) prevError.parentNode.removeChild(prevError);
+
+      startBtn.disabled = true;
+      startBtn.textContent = 'Starting...';
+
       try {
         const data = await createSession(name, email, phone);
         sessionId = data.session_id;
@@ -349,10 +568,19 @@
         showChatBody();
         if (data.welcome_message) appendMessage('agent', data.welcome_message);
       } catch (e) {
-        alert('Failed to start chat. Please try again.');
+        const errorP = document.createElement('p');
+        errorP.className = 'flowai-prechat-error';
+        errorP.textContent = 'Something went wrong. Please try again.';
+        errorP.style.color = '#C00';
+        errorP.style.fontSize = '13px';
+        errorP.style.margin = '0';
+        form.appendChild(errorP);
+      } finally {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start Chat';
       }
     });
-    
+
     document.getElementById('flowai-send-btn').addEventListener('click', () => {
       const input = document.getElementById('flowai-message-input');
       const text = input.value.trim();
@@ -361,7 +589,7 @@
         sendMessage(text);
       }
     });
-    
+
     document.getElementById('flowai-message-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -369,7 +597,7 @@
       }
     });
   }
-  
+
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   function init() {
     injectStyles();
@@ -377,11 +605,11 @@
     wireEvents();
     initSession();
   }
-  
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-  
+
 })();
