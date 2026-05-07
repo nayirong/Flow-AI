@@ -10,7 +10,7 @@ Four routes:
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -38,6 +38,37 @@ def _normalize_phone(phone: str) -> str:
     if len(phone) == 8 and phone[0] in "689":
         phone = "65" + phone
     return phone
+
+
+def _parse_utc_timestamp(raw: Optional[str]) -> Optional[datetime]:
+    """Parse ISO timestamp strings returned by Supabase into timezone-aware UTC datetimes."""
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _is_widget_session_expired(session_row: dict, ttl_minutes: int) -> bool:
+    """
+    Determine whether a widget session is expired based on inactivity TTL.
+
+    Sessions are considered expired if:
+    - expired_at is already set, OR
+    - last_active_at (fallback: created_at) is older than ttl_minutes.
+    """
+    if session_row.get("expired_at") is not None:
+        return True
+
+    last_active = _parse_utc_timestamp(session_row.get("last_active_at"))
+    if last_active is None:
+        last_active = _parse_utc_timestamp(session_row.get("created_at"))
+    if last_active is None:
+        return False
+
+    return datetime.now(timezone.utc) - last_active > timedelta(minutes=ttl_minutes)
 
 
 # ── Request/Response models ───────────────────────────────────────────────────
@@ -189,14 +220,19 @@ async def send_message(client_id: str, request: SendMessageRequest):
     try:
         client_db = await get_client_db(client_id)
         session_result = await client_db.table("sessions").select(
-            "session_id, expired_at"
+            "session_id, expired_at, last_active_at, created_at"
         ).eq("session_id", request.session_id).eq("client_id", client_id).limit(1).execute()
 
         if not session_result.data:
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_row = session_result.data[0]
-        if session_row.get("expired_at") is not None:
+        if _is_widget_session_expired(session_row, client_config.widget_session_ttl_minutes):
+            if session_row.get("expired_at") is None:
+                now = datetime.now(timezone.utc).isoformat()
+                await client_db.table("sessions").update({
+                    "expired_at": now,
+                }).eq("session_id", request.session_id).execute()
             raise HTTPException(status_code=410, detail="Session expired")
 
         # Update last_active_at
@@ -259,14 +295,19 @@ async def get_history(client_id: str, session_id: str = Query(...)):
     try:
         client_db = await get_client_db(client_id)
         session_result = await client_db.table("sessions").select(
-            "session_id, expired_at"
+            "session_id, expired_at, last_active_at, created_at"
         ).eq("session_id", session_id).eq("client_id", client_id).limit(1).execute()
 
         if not session_result.data:
             raise HTTPException(status_code=404, detail="Session not found")
 
         session_row = session_result.data[0]
-        if session_row.get("expired_at") is not None:
+        if _is_widget_session_expired(session_row, client_config.widget_session_ttl_minutes):
+            if session_row.get("expired_at") is None:
+                now = datetime.now(timezone.utc).isoformat()
+                await client_db.table("sessions").update({
+                    "expired_at": now,
+                }).eq("session_id", session_id).execute()
             raise HTTPException(status_code=410, detail="Session expired")
 
     except HTTPException:
