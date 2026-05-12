@@ -292,6 +292,10 @@
         #flowai-input-row {
           padding-bottom: calc(12px + env(safe-area-inset-bottom));
         }
+        #flowai-message-input,
+        #flowai-prechat-form input {
+          font-size: 16px;
+        }
       }
     `;
     document.head.appendChild(style);
