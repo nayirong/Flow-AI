@@ -15,7 +15,8 @@ This directory contains test plans, acceptance criteria, and worktree management
 - `features/address_schema_migration.md` — Address fields migration: `customers` → `bookings` (Phase 2 code change in `write_booking()`) — **READY FOR IMPLEMENTATION** (April 2026)
 - `features/telegram_alerts.md` — Internal Telegram Alert Bot: real-time Tier 1/2 failure alerts to internal team chat — **READY FOR IMPLEMENTATION** (April 2026)
 - `features/llm_digest.md` — LLM Observability: Fallback Warning Telegram alert + Daily LLM digest scheduler — **READY FOR IMPLEMENTATION** (April 2026)
-- `features/widget_06_formatting.md` — Widget 06: Markdown rendering, typing indicator, accessibility (aria, focus rings, inline errors) — **READY FOR IMPLEMENTATION** (May 2026)
+- `features/widget_06_formatting.md` — Widget 06: Markdown rendering, typing indicator, accessibility (aria, focus rings, inline errors) — **COMPLETE** (May 2026)
+- `features/widget_07_mobile_keyboard_fix.md` — Widget 07: Mobile keyboard/viewport fix — iOS visualViewport listener, Android resize fallback, safe-area insets, overscroll-behavior — **IN PROGRESS** (May 2026)
 
 ### Source documents (read before producing test plan)
 - `clients/hey-aircon/plans/mvp_scope.md` — acceptance criteria per component (§What's NOT Built Yet, §Supabase schemas)
