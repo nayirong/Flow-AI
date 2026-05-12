@@ -40,8 +40,7 @@ jobs:
         run: |
           python -m engine.tests.eval.run_eval \
             --report-format html \
-            --output-dir ./eval_reports \
-            --compare-branch master
+            --output-dir ./eval_reports
       
       - name: Upload HTML report
         if: always()
