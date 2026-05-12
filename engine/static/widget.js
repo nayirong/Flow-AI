@@ -134,6 +134,7 @@
         flex-direction: column;
         flex: 1;
         overflow: hidden;
+        min-height: 0;
       }
       #flowai-messages {
         flex: 1;
@@ -142,6 +143,8 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
+        min-height: 0;
+        overscroll-behavior: contain;
       }
       .flowai-message {
         max-width: 75%;
@@ -266,6 +269,29 @@
       #flowai-send-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+      @media (max-width: 480px) {
+        #flowai-widget-window {
+          position: fixed;
+          bottom: 0;
+          right: 0;
+          left: 0;
+          top: auto;
+          width: 100%;
+          height: 100%;
+          max-height: 100%;
+          border-radius: 0;
+          border-top-left-radius: 12px;
+          border-top-right-radius: 12px;
+          box-sizing: border-box;
+        }
+        #flowai-widget-btn {
+          bottom: calc(20px + env(safe-area-inset-bottom));
+          right: 20px;
+        }
+        #flowai-input-row {
+          padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        }
       }
     `;
     document.head.appendChild(style);
@@ -540,6 +566,9 @@
     widgetWindow.style.display = isOpen ? 'flex' : 'none';
     const launcherBtn = document.getElementById('flowai-widget-btn');
     launcherBtn.setAttribute('aria-label', isOpen ? 'Close chat' : 'Open chat');
+    if (!isOpen) {
+      window._flowaiResetViewport && window._flowaiResetViewport();
+    }
   }
 
   // ── Event wiring ───────────────────────────────────────────────────────────
@@ -596,6 +625,76 @@
         document.getElementById('flowai-send-btn').click();
       }
     });
+
+    preventPageScrollOnFocus(document.getElementById('flowai-message-input'));
+    preventPageScrollOnFocus(document.getElementById('flowai-name'));
+    preventPageScrollOnFocus(document.getElementById('flowai-email'));
+    preventPageScrollOnFocus(document.getElementById('flowai-phone'));
+  }
+
+  // ── Focus scroll helper ────────────────────────────────────────────────────
+  function preventPageScrollOnFocus(inputElement) {
+    if (!inputElement) return;
+    inputElement.addEventListener('focus', function(e) {
+      // scrollIntoView with block:'nearest' performs zero movement when the element
+      // is already visible — the visualViewport listener handles actual repositioning.
+      e.target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    }, { passive: true });
+  }
+
+  // ── Mobile viewport listeners ──────────────────────────────────────────────
+  function setupViewportListeners() {
+    if (!window.visualViewport) {
+      console.warn('[FlowAI] visualViewport API unavailable — mobile keyboard repositioning disabled. Ensure your page uses a standard viewport meta tag.');
+    }
+
+    const widgetWindow = document.getElementById('flowai-widget-window');
+    if (!widgetWindow) return;
+
+    function isMobile() {
+      return window.innerWidth <= 480;
+    }
+
+    function onVisualViewportChange() {
+      if (!isOpen || !isMobile()) return;
+      const vv = window.visualViewport;
+      // vv.height = visible height above the keyboard
+      // vv.offsetTop = distance from layout viewport top to visual viewport top
+      widgetWindow.style.height = vv.height + 'px';
+      widgetWindow.style.top = vv.offsetTop + 'px';
+      widgetWindow.style.bottom = 'auto';
+    }
+
+    function resetWidgetPosition() {
+      if (!isMobile()) return;
+      // Clear inline overrides — CSS media query takes over
+      widgetWindow.style.height = '';
+      widgetWindow.style.top = '';
+      widgetWindow.style.bottom = '';
+    }
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', onVisualViewportChange);
+      window.visualViewport.addEventListener('scroll', onVisualViewportChange);
+    } else {
+      // Android fallback: window.resize fires when keyboard changes window.innerHeight
+      // Only activate when visualViewport is absent to prevent double-handling on modern Android
+      var lastInnerHeight = window.innerHeight;
+      window.addEventListener('resize', function() {
+        if (!isOpen || !isMobile()) return;
+        var newHeight = window.innerHeight;
+        if (newHeight === lastInnerHeight) return;
+        lastInnerHeight = newHeight;
+        var ww = document.getElementById('flowai-widget-window');
+        if (!ww) return;
+        ww.style.height = newHeight + 'px';
+        ww.style.top = '0px';
+        ww.style.bottom = 'auto';
+      });
+    }
+
+    // Expose reset so toggleWidget() can clear inline styles on close
+    window._flowaiResetViewport = resetWidgetPosition;
   }
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
@@ -603,6 +702,7 @@
     injectStyles();
     injectHTML();
     wireEvents();
+    setupViewportListeners();
     initSession();
   }
 
