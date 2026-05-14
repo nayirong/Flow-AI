@@ -1,7 +1,7 @@
 # Flow AI — Project Status Log
 
 > Owned by: chief-of-staff
-> Last Updated: 2026-05-06
+> Last Updated: 2026-05-13
 
 ---
 
@@ -88,6 +88,8 @@
 
 | Date | Phase | Description | Status |
 |------|-------|-------------|--------|
+| 2026-05-13 | Architecture | `@software-architect` dispatched for three features simultaneously: immediate escalation trigger, AI schedule/business hours, and human takeover detection. All three architecture specs produced: `docs/architecture/immediate_escalation.md`, `docs/architecture/ai_schedule.md`, `docs/architecture/human_takeover.md`. Critical finding: Meta Cloud API does NOT deliver echo webhooks for business-initiated messages — human takeover will use Option B (reply-to-forwarded-alert, no phone number input). Migration 012 (ai_schedule — 5 columns on `clients`) and Migration 013 (human_takeover — 3 columns on `customers` + `takeover_tracking` table) specified. Ready for `@sdet-engineer`. | Complete |
+| 2026-05-13 | Requirements | Second HeyAircon client meeting items processed. Three requirements docs written: `immediate_escalation.md` (priority: launch-adjacent, reprioritised to immediate), `ai_schedule.md` (launch-adjacent), `human_takeover.md` v0.2 (redesigned — `//takeover +phone` command rejected by founder; replaced with echo-first/reply-to-alert no-phone-number design). Items 3 (ad click-through) and 5 (dashboard) deferred to backlog. | Complete |
 | 2026-05-06 | Infrastructure | Deployment model changed from single `release` branch to per-client `deploy/{client-id}` branches. Reason: single `release` branch deployed to all clients simultaneously, creating risk of cross-client impact. New model: `master` for development, `deploy/hey-aircon` tracked by hey-aircon Railway project, `deploy/flow-ai` tracked by flow-ai Railway project. Promotion: `git push origin master:deploy/{client-id}`. Old `release` branch deprecated. | Complete |
 | 2026-04-28 | Status Review | Chief-of-staff status review: All migration gates cleared (48h verification passed, calendar working). Two critical bugs identified: (1) guardrail re-prompt leaking to customers, (2) booking_count not incrementing on first booking. Rescheduling & cancellation feature evaluation complete — classified as **Core**, requires Calendar Write Rules policy change (add modify/delete capability). Awaiting direction frame confirmation before dispatching `@product-manager`. | In Progress |
 | 2026-04-24 | Client Report | HeyAircon client-facing status report generated. Content drafted by chief-of-staff; file write delegated to `@sdet-engineer` → `docs/client-reports/heyaircon_status_2026-04-24.md`. | Complete |
