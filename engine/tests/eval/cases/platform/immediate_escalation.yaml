@@ -1,0 +1,241 @@
+# Platform-level Immediate Escalation Test Cases
+# Covers capability-based immediate escalation: 6 unanswerable categories,
+# tool-answerable questions, out-of-catalogue special case, prohibited phrases
+# Owner: SDET Engineer | Applies to ALL clients
+
+- test_name: "immediate_escalation_category_1_real_time_dispatch"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "What time is the technician coming today?"
+  expected_intent: "booking_inquiry"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["don't have access to real-time dispatch", "team will reach out"]
+  prohibited_response_contains: ["I'm not sure", "Let me check", "Let me find out", "I'll look into that"]
+  reference_test: true
+  tags: ["immediate_escalation", "category_1", "real_time_data"]
+  enabled: true
+  metadata:
+    rule: "Category 1: Real-time operational data → escalate immediately"
+    setup: "Customer with confirmed booking for today"
+    escalation_reason_must_contain: ["real-time dispatch", "Category 1"]
+
+- test_name: "immediate_escalation_category_2_historical_data"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "What was the cost of my March service?"
+  expected_intent: "booking_inquiry"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["don't have access to past job records", "team will follow up"]
+  prohibited_response_contains: ["I'm not sure", "Let me check", "Let me find out", "I'll look into that"]
+  prohibited_tool: "get_customer_bookings"
+  reference_test: true
+  tags: ["immediate_escalation", "category_2", "historical_data"]
+  enabled: true
+  metadata:
+    rule: "Category 2: Historical account data → escalate immediately, do NOT call get_customer_bookings"
+    setup: "Returning customer"
+    escalation_reason_must_contain: ["historical", "past job records", "Category 2"]
+
+- test_name: "immediate_escalation_category_3_pricing_exception"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "Can I get a discount?"
+  expected_intent: "pricing_inquiry"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["not able to offer discounts", "team can discuss pricing options"]
+  prohibited_response_contains: ["I'm not sure", "Let me check", "Let me find out"]
+  reference_test: true
+  tags: ["immediate_escalation", "category_3", "pricing_exception"]
+  enabled: true
+  metadata:
+    rule: "Category 3: Pricing exceptions → escalate immediately"
+    setup: "Customer inquiring about service"
+    escalation_reason_must_contain: ["discount", "pricing exception", "Category 3"]
+
+- test_name: "immediate_escalation_category_4_complaint_resolution"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "The technician did a bad job last time, I want a refund"
+  expected_intent: "complaint"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["understand this is frustrating", "team will reach out"]
+  prohibited_response_contains: ["I'm not sure", "Let me check"]
+  reference_test: true
+  tags: ["immediate_escalation", "category_4", "complaint"]
+  enabled: true
+  metadata:
+    rule: "Category 4: Complaint resolution → escalate immediately"
+    setup: "Customer had previous service"
+    escalation_reason_must_contain: ["complaint", "service recovery", "refund", "Category 4"]
+
+- test_name: "immediate_escalation_category_5_out_of_catalogue_lists_services_first"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "high"
+  input_message: "Do you repair refrigerators?"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  expected_response_contains: ["aircon servicing", "don't currently service refrigerators"]
+  reference_test: true
+  tags: ["immediate_escalation", "category_5", "out_of_catalogue", "multi_step"]
+  enabled: true
+  metadata:
+    rule: "Category 5 (special case): Out-of-catalogue services → list offered services first, do NOT escalate immediately"
+    setup: "HeyAircon (aircon services only)"
+
+- test_name: "immediate_escalation_category_5_out_of_catalogue_escalates_after_persist"
+  client_id: "hey-aircon"
+  category: "escalation"
+  priority: "high"
+  input_message: "No, I need a fridge repair."
+  expected_intent: "service_inquiry"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["I understand", "team will reach out"]
+  reference_test: false
+  tags: ["immediate_escalation", "category_5", "out_of_catalogue", "multi_step"]
+  enabled: true
+  metadata:
+    rule: "Category 5 (follow-up): Customer persists with out-of-catalogue → escalate now"
+    setup: "Follow-up to test_immediate_escalation_category_5_out_of_catalogue_lists_services_first"
+    escalation_reason_must_contain: ["refrigerator", "not in service catalogue", "Category 5"]
+
+- test_name: "immediate_escalation_category_6_business_process_exception"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "Can you come tomorrow morning?"
+  expected_intent: "booking_request"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["standard lead time", "team can check if an earlier slot is possible"]
+  prohibited_response_contains: ["I'm not sure", "Let me check"]
+  reference_test: true
+  tags: ["immediate_escalation", "category_6", "process_exception"]
+  enabled: true
+  metadata:
+    rule: "Category 6: Business process exceptions → escalate immediately"
+    setup: "Lead time is 2 days (from config)"
+    escalation_reason_must_contain: ["emergency booking", "lead time exception", "Category 6"]
+
+- test_name: "immediate_escalation_tool_answerable_availability_does_not_escalate"
+  client_id: "platform"
+  category: "tool_use"
+  priority: "critical"
+  input_message: "Do you have availability next week?"
+  expected_intent: "booking_request"
+  expected_tool: "check_calendar_availability"
+  expected_escalation: false
+  prohibited_tool: "escalate_to_human"
+  reference_test: true
+  tags: ["immediate_escalation", "tool_answerable", "negative_case"]
+  enabled: true
+  metadata:
+    rule: "Tool-answerable questions → do NOT escalate, call the tool"
+    setup: "Customer has no bookings"
+
+- test_name: "immediate_escalation_tool_answerable_get_bookings_does_not_escalate"
+  client_id: "platform"
+  category: "tool_use"
+  priority: "critical"
+  input_message: "What are my upcoming appointments?"
+  expected_intent: "booking_inquiry"
+  expected_tool: "get_customer_bookings"
+  expected_escalation: false
+  prohibited_tool: "escalate_to_human"
+  reference_test: true
+  tags: ["immediate_escalation", "tool_answerable", "negative_case"]
+  enabled: true
+  metadata:
+    rule: "Tool-answerable questions (get_customer_bookings) → do NOT escalate"
+    setup: "Customer has confirmed booking for next week"
+
+- test_name: "immediate_escalation_pricing_from_knowledge_does_not_escalate"
+  client_id: "platform"
+  category: "knowledge_base"
+  priority: "high"
+  input_message: "How much does a 3-unit aircon service cost?"
+  expected_intent: "pricing_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  prohibited_tool: "escalate_to_human"
+  reference_test: true
+  tags: ["immediate_escalation", "knowledge_answerable", "negative_case"]
+  enabled: true
+  metadata:
+    rule: "Pricing questions answerable from knowledge base → do NOT escalate, do NOT call tool"
+    setup: "Pricing knowledge base loaded"
+
+- test_name: "immediate_escalation_ambiguous_question_clarifies_not_escalates"
+  client_id: "platform"
+  category: "intent"
+  priority: "medium"
+  input_message: "Can you help me with my unit?"
+  expected_intent: "service_inquiry"
+  expected_tool: null
+  expected_escalation: false
+  prohibited_tool: "escalate_to_human"
+  reference_test: false
+  tags: ["immediate_escalation", "ambiguous", "negative_case"]
+  enabled: true
+  metadata:
+    rule: "Ambiguous question → ask clarification, do NOT escalate immediately"
+    setup: "None"
+
+- test_name: "immediate_escalation_multi_part_question_handles_both"
+  client_id: "platform"
+  category: "escalation"
+  priority: "medium"
+  input_message: "What time is the technician coming, and do you have availability next week?"
+  expected_intent: "booking_inquiry"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["real-time dispatch", "availability"]
+  reference_test: false
+  tags: ["immediate_escalation", "multi_part", "mixed"]
+  enabled: true
+  metadata:
+    rule: "Multi-part question: escalate for unanswerable part, mention can help with tool-answerable part"
+    setup: "None"
+
+- test_name: "immediate_escalation_no_deflection_phrases_before_escalation"
+  client_id: "platform"
+  category: "escalation"
+  priority: "critical"
+  input_message: "What time is the tech coming?"
+  expected_intent: "booking_inquiry"
+  expected_tool: "escalate_to_human"
+  expected_escalation: true
+  expected_tool_params:
+    reason: "{{ reason }}"
+  expected_response_contains: ["don't have access to"]
+  prohibited_response_contains: ["I'm not sure", "Let me find out", "Let me check on that", "I'll look into that"]
+  reference_test: true
+  tags: ["immediate_escalation", "prohibited_phrases", "capability_statement"]
+  enabled: true
+  metadata:
+    rule: "Agent's first action must be escalate_to_human, response must be capability statement, NOT deflection"
+    setup: "Category 1 scenario"

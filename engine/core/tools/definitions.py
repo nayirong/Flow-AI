@@ -172,14 +172,16 @@ _GET_CUSTOMER_BOOKINGS_TOOL: dict = {
 _ESCALATE_TO_HUMAN_TOOL: dict = {
     "name": "escalate_to_human",
     "description": (
-        "Escalate the conversation to a human agent. Use this when: "
-        "(1) the customer explicitly asks to speak to a person, "
-        "(2) the requested slot is fully booked and the customer wants to arrange "
-        "an alternative, "
-        "(3) the customer requests a reschedule or cancellation, "
-        "(4) the customer raises a complaint or urgent issue, "
-        "(5) the question is outside the scope of the agent's context. "
-        "After calling this, inform the customer that the team will follow up."
+        "Escalate the conversation to a human agent. Use this tool in TWO scenarios:\n"
+        "1. IMMEDIATE (capability-based): You have determined the customer's question is unanswerable "
+        "because the required information is not in your knowledge base, policies, or available tools. "
+        "See the UNANSWERABLE QUESTION CATEGORIES in your system instructions for examples.\n"
+        "2. GRADUAL (customer-requested): The customer explicitly asks to speak to a person, "
+        "or expresses frustration/anger that requires human judgment.\n"
+        "After calling this, you must inform the customer that a team member will follow up. "
+        "Include a clear reason parameter explaining which category applies (e.g., "
+        "'Customer asked for real-time dispatch information (Category 1)' or "
+        "'Customer requested to speak to a human')."
     ),
     "input_schema": {
         "type": "object",
