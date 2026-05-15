@@ -56,6 +56,13 @@ class ClientConfig:
     widget_allowed_origins: str = ''
     widget_session_ttl_minutes: int = 30
     widget_button_icon: str = '💬'
+    
+    # Schedule fields (migration 012)
+    ai_active_start_time: str | None = None  # HH:MM:SS format
+    ai_active_end_time: str | None = None    # HH:MM:SS format
+    business_start_time: str | None = None   # HH:MM:SS format
+    business_end_time: str | None = None     # HH:MM:SS format
+    # Note: timezone field already exists in dataclass (line 41)
 
 
 class ClientNotFoundError(Exception):
@@ -176,6 +183,12 @@ async def load_client_config(client_id: str) -> ClientConfig:
         widget_allowed_origins=row.get("widget_allowed_origins", ''),
         widget_session_ttl_minutes=row.get("widget_session_ttl_minutes", 30),
         widget_button_icon=row.get("widget_button_icon", "💬"),
+        # Schedule fields (safe to access — migration 012 adds defaults)
+        ai_active_start_time=row.get("ai_active_start_time"),
+        ai_active_end_time=row.get("ai_active_end_time"),
+        business_start_time=row.get("business_start_time"),
+        business_end_time=row.get("business_end_time"),
+        # timezone already loaded above
     )
     
     # 5. Cache with TTL
