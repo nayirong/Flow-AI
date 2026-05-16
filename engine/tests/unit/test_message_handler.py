@@ -38,6 +38,7 @@ def _make_db(customer_row=None):
     chain.select.return_value = chain
     chain.insert.return_value = chain
     chain.update.return_value = chain
+    chain.in_.return_value = chain
     chain.eq.return_value = chain
     chain.limit.return_value = chain
     chain.order.return_value = chain

@@ -36,6 +36,7 @@ def _make_full_db(customer_row=None, interactions_log_count=1):
         chain.gt.return_value = chain
         chain.lt.return_value = chain
         chain.is_.return_value = chain
+        chain.in_.return_value = chain
         chain.not_.eq = MagicMock(return_value=chain)
         chain.limit.return_value = chain
         chain.order.return_value = chain
@@ -105,7 +106,7 @@ async def test_full_takeover_lifecycle(mock_full_config):
                     )
     
     # Verify conversation alert was sent
-    alert_calls = [call for call in mock_send.call_args_list if "AI handling" in call[1]["text"]]
+    alert_calls = [call for call in mock_send.call_args_list if "AI handling" in call[1].get("text", "")]
     assert len(alert_calls) > 0
     
     # Step 2: Human agent replies "take" to the alert
@@ -312,7 +313,7 @@ async def test_conversation_alert_throttling(mock_full_config):
                     )
     
     # Verify alert sent
-    alert_calls_1 = [call for call in mock_send.call_args_list if "AI handling" in call[1]["text"]]
+    alert_calls_1 = [call for call in mock_send.call_args_list if "AI handling" in call[1].get("text", "")]
     assert len(alert_calls_1) == 1
     
     # Second message: session active (count=2, current + previous)
@@ -336,7 +337,7 @@ async def test_conversation_alert_throttling(mock_full_config):
                     )
     
     # Verify NO alert sent (session still active)
-    alert_calls_2 = [call for call in mock_send.call_args_list if "AI handling" in call[1]["text"]]
+    alert_calls_2 = [call for call in mock_send.call_args_list if "AI handling" in call[1].get("text", "")]
     assert len(alert_calls_2) == 0
 
 
