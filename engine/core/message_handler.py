@@ -48,6 +48,10 @@ HOLDING_REPLY = (
     "A member of our team will get back to you today."
 )
 
+# When True, out-of-hours messages are silently dropped (no auto-reply sent).
+# Set to False to re-enable the auto-reply with business hours.
+OUT_OF_HOURS_SILENT = True
+
 # Sent when a critical Supabase failure prevents normal processing.
 FALLBACK_REPLY = (
     "We're experiencing a technical issue right now. "
@@ -595,13 +599,19 @@ async def handle_inbound_message(
 
         # ── Step 4b: Schedule gate — AI operational hours check ───────────────
         if not _is_within_ai_hours(client_config):
-            await _handle_out_of_hours_message(
-                db=db,
-                client_config=client_config,
-                phone_number=phone_number,
-                display_name=display_name,
-                message_text=message_text,
-            )
+            if not OUT_OF_HOURS_SILENT:
+                await _handle_out_of_hours_message(
+                    db=db,
+                    client_config=client_config,
+                    phone_number=phone_number,
+                    display_name=display_name,
+                    message_text=message_text,
+                )
+            else:
+                logger.info(
+                    f"Out-of-hours silent drop for {phone_number} "
+                    f"(client: {client_config.client_id})"
+                )
             return  # Stop pipeline — do NOT invoke agent
 
         # ── Step 5: Upsert customer record ────────────────────────────────────
