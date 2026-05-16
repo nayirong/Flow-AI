@@ -15,7 +15,8 @@ The webhook has already returned 200 to Meta before this function runs.
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time as dt_time
+from zoneinfo import ZoneInfo
 
 from engine.config.client_config import load_client_config, ClientNotFoundError
 from engine.integrations.supabase_client import get_client_db
@@ -84,6 +85,142 @@ def _is_opt_out_keyword(message_text: str) -> bool:
     normalised = re.sub(r"[^a-z0-9\s]+", " ", (message_text or "").lower())
     normalised = " ".join(normalised.split())
     return normalised in _OPT_OUT_KEYWORDS
+
+
+def _is_within_ai_hours(client_config) -> bool:
+    """
+    Check if current time is within AI operational hours for this client.
+
+    Returns:
+        True if AI should handle this message, False if out-of-hours.
+        Returns True (always active) if ai_active_start_time and ai_active_end_time are both None.
+    """
+    start_time = client_config.ai_active_start_time
+    end_time = client_config.ai_active_end_time
+    
+    # If both NULL, AI is active 24/7
+    if start_time is None and end_time is None:
+        return True
+    
+    # If only one is set (should not happen due to DB constraint, but handle gracefully)
+    if start_time is None or end_time is None:
+        logger.warning(
+            f"Client {client_config.client_id} has partial AI hours config "
+            f"(start={start_time}, end={end_time}) — defaulting to 24/7 active"
+        )
+        return True
+    
+    # Parse timezone (default to UTC if invalid)
+    try:
+        tz = ZoneInfo(client_config.timezone)
+    except Exception as e:
+        logger.error(
+            f"Invalid timezone '{client_config.timezone}' for client {client_config.client_id}: {e} "
+            f"— defaulting to UTC"
+        )
+        tz = ZoneInfo("UTC")
+    
+    # Get current time in client's timezone
+    now = datetime.now(tz)
+    current_time = now.time()
+    
+    # Parse start/end times (format: "HH:MM:SS")
+    try:
+        start_hour, start_min, start_sec = map(int, start_time.split(":"))
+        end_hour, end_min, end_sec = map(int, end_time.split(":"))
+        start = dt_time(start_hour, start_min, start_sec)
+        end = dt_time(end_hour, end_min, end_sec)
+    except Exception as e:
+        logger.error(
+            f"Failed to parse AI hours for client {client_config.client_id}: {e} "
+            f"— defaulting to 24/7 active"
+        )
+        return True
+    
+    # Edge case: start == end → no active window
+    if start == end:
+        logger.warning(
+            f"Client {client_config.client_id} has AI hours start == end ({start}) — "
+            f"no active window (AI inactive 24/7)"
+        )
+        return False
+    
+    # Check if current time is within window
+    if start <= end:
+        # Daytime window (e.g., 09:00 → 18:00)
+        return start <= current_time < end
+    else:
+        # Overnight window (e.g., 18:00 → 09:00)
+        return current_time >= start or current_time < end
+
+
+async def _handle_out_of_hours_message(
+    db,
+    client_config,
+    phone_number: str,
+    display_name: str,
+    message_text: str,
+) -> None:
+    """
+    Handle a message that arrived outside AI operational hours.
+    
+    Steps:
+    1. Build auto-reply message (with business hours if configured)
+    2. Send auto-reply to customer
+    3. Log outbound message
+    4. Return (do NOT invoke agent)
+    """
+    # Build auto-reply message
+    if client_config.business_start_time and client_config.business_end_time:
+        # Format business hours (strip seconds for customer-facing text)
+        start = client_config.business_start_time[:5]  # "09:00:00" -> "09:00"
+        end = client_config.business_end_time[:5]
+        
+        # Convert to 12-hour format with am/pm for readability
+        def format_12hr(time_str: str) -> str:
+            hour, minute = map(int, time_str.split(":"))
+            period = "am" if hour < 12 else "pm"
+            hour_12 = hour if hour <= 12 else hour - 12
+            hour_12 = 12 if hour_12 == 0 else hour_12  # midnight = 12am
+            return f"{hour_12}:{minute:02d}{period}"
+        
+        start_12hr = format_12hr(start)
+        end_12hr = format_12hr(end)
+        hours_text = f"Our team operates {start_12hr}–{end_12hr}."
+    else:
+        hours_text = "Our team will respond shortly."
+    
+    auto_reply = f"Thanks for reaching out! {hours_text} A team member will respond shortly."
+    
+    # Send auto-reply
+    try:
+        await send_message(client_config, phone_number, auto_reply)
+        logger.info(
+            f"Out-of-hours auto-reply sent to {phone_number} (client: {client_config.client_id})"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to send out-of-hours auto-reply to {phone_number}: {e}",
+            exc_info=True,
+        )
+        # Continue to logging even if send failed
+    
+    # Log outbound
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.table("interactions_log").insert({
+            "timestamp": now,
+            "phone_number": phone_number,
+            "direction": "outbound",
+            "message_text": auto_reply,
+            "message_type": "text",
+        }).execute()
+    except Exception as e:
+        logger.error(
+            f"Failed to log out-of-hours auto-reply for {phone_number}: {e}",
+            exc_info=True,
+        )
+
 
 
 def _remove_current_inbound_from_history(
@@ -306,6 +443,17 @@ async def handle_inbound_message(
                     exc_info=True,
                 )
             return  # Agent does NOT run for escalated customers.
+
+        # ── Step 4b: Schedule gate — AI operational hours check ───────────────
+        if not _is_within_ai_hours(client_config):
+            await _handle_out_of_hours_message(
+                db=db,
+                client_config=client_config,
+                phone_number=phone_number,
+                display_name=display_name,
+                message_text=message_text,
+            )
+            return  # Stop pipeline — do NOT invoke agent
 
         # ── Step 5: Upsert customer record ────────────────────────────────────
         # Use upsert with ignore_duplicates=True (ON CONFLICT DO NOTHING) to
