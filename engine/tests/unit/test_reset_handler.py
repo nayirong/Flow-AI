@@ -103,7 +103,7 @@ def _make_client_config():
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_no_context_id_sends_help(mock_send):
     """Human agent sends fresh message (not a reply) → help message sent."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -127,7 +127,7 @@ async def test_no_context_id_sends_help(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_no_matching_alert_sends_not_found(mock_send):
     """Human agent replies to unrelated message → 'no escalation found' sent."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -150,7 +150,7 @@ async def test_no_matching_alert_sends_not_found(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_already_resolved_alert_sends_not_found(mock_send):
     """Human agent replies to already-resolved alert → 'no escalation found' sent."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -174,7 +174,7 @@ async def test_already_resolved_alert_sends_not_found(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_historical_alert_recovers_latest_unresolved_escalation(mock_send):
     """Replying to an older alert can clear the latest unresolved escalation for that customer."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -213,7 +213,7 @@ async def test_historical_alert_recovers_latest_unresolved_escalation(mock_send)
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_unrecognised_keyword_sends_help(mock_send):
     """Human agent replies with typo → help message sent, flag NOT cleared."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -242,14 +242,14 @@ async def test_unrecognised_keyword_sends_help(mock_send):
     # Assert help message sent
     mock_send.assert_awaited_once()
     call_args = mock_send.call_args
-    assert "reply with" in call_args[0][2].lower()
+    assert "valid commands" in call_args[0][2].lower()
     
     # Assert customers update NOT called (flag not cleared)
     customers_chain.update.assert_not_called()
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_emoji_sends_help(mock_send):
     """Human agent replies with emoji → help message sent."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -278,14 +278,14 @@ async def test_emoji_sends_help(mock_send):
     # Assert help message sent
     mock_send.assert_awaited_once()
     call_args = mock_send.call_args
-    assert "reply with" in call_args[0][2].lower()
+    assert "valid commands" in call_args[0][2].lower()
     
     # Assert customers update NOT called
     customers_chain.update.assert_not_called()
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_keyword_done_clears_flag(mock_send):
     """Human agent replies with 'done' → flag cleared, confirmation sent."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -327,7 +327,7 @@ async def test_keyword_done_clears_flag(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_keyword_uppercase_clears_flag(mock_send):
     """Human agent replies with 'DONE' → flag cleared (case insensitive)."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -360,7 +360,7 @@ async def test_keyword_uppercase_clears_flag(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_keyword_internal_space_clears_flag(mock_send):
     """Human agent replies with 'res olved' → normalised, flag cleared."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -393,7 +393,7 @@ async def test_keyword_internal_space_clears_flag(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_keyword_leading_trailing_space_clears_flag(mock_send):
     """Human agent replies with '  done  ' → stripped, flag cleared."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -426,7 +426,7 @@ async def test_keyword_leading_trailing_space_clears_flag(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_keyword_ok_clears_flag(mock_send):
     """Human agent replies with 'ok' → flag cleared."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -459,7 +459,7 @@ async def test_keyword_ok_clears_flag(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_confirmation_contains_customer_info(mock_send):
     """Confirmation message contains customer phone number."""
     from engine.core.reset_handler import handle_human_agent_message
@@ -492,7 +492,7 @@ async def test_confirmation_contains_customer_info(mock_send):
 
 
 @pytest.mark.asyncio
-@patch("engine.integrations.meta_whatsapp.send_message", new_callable=AsyncMock)
+@patch("engine.core.reset_handler.send_message", new_callable=AsyncMock)
 async def test_db_failure_sends_error_reply(mock_send):
     """DB UPDATE raises exception → error message sent, no re-raise."""
     from engine.core.reset_handler import handle_human_agent_message

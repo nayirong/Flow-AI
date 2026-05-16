@@ -182,3 +182,117 @@ async def load_client_config(client_id: str) -> ClientConfig:
     _cache[client_id] = (config, now + CACHE_TTL_SECONDS)
     
     return config
+
+
+async def get_all_active_clients() -> list[ClientConfig]:
+    """
+    Load all active clients from shared Supabase.
+    
+    Used by scheduler jobs (followup, takeover auto-resume) to iterate over all clients.
+    
+    Returns:
+        List of ClientConfig objects for all clients where is_active=True.
+    """
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    db = await get_shared_db()
+    
+    try:
+        result = await (
+            db.table("clients")
+            .select("*")
+            .eq("is_active", True)
+            .execute()
+        )
+    except Exception as e:
+        logger.error(f"Failed to load active clients: {e}", exc_info=True)
+        raise
+    
+    if not result.data:
+        logger.warning("No active clients found in shared Supabase")
+        return []
+    
+    configs = []
+    for row in result.data:
+        try:
+            # Same construction logic as load_client_config()
+            client_id = row["client_id"]
+            client_id_upper = client_id.upper().replace("-", "_")
+            
+            meta_whatsapp_token = os.getenv(f"{client_id_upper}_META_WHATSAPP_TOKEN")
+            if not meta_whatsapp_token:
+                logger.warning(f"Skipping {client_id}: missing META_WHATSAPP_TOKEN")
+                continue
+
+            supabase_url = (
+                os.getenv(f"{client_id_upper}_SUPABASE_URL")
+                or os.getenv("SHARED_SUPABASE_URL")
+            )
+            if not supabase_url:
+                logger.warning(f"Skipping {client_id}: missing SUPABASE_URL")
+                continue
+
+            supabase_service_key = (
+                os.getenv(f"{client_id_upper}_SUPABASE_SERVICE_KEY")
+                or os.getenv("SHARED_SUPABASE_SERVICE_KEY")
+            )
+            if not supabase_service_key:
+                logger.warning(f"Skipping {client_id}: missing SUPABASE_SERVICE_KEY")
+                continue
+
+            anthropic_api_key = (
+                os.getenv(f"{client_id_upper}_ANTHROPIC_API_KEY")
+                or os.getenv("ANTHROPIC_API_KEY")
+            )
+            if not anthropic_api_key:
+                logger.warning(f"Skipping {client_id}: missing ANTHROPIC_API_KEY")
+                continue
+
+            openai_api_key = (
+                os.getenv(f"{client_id_upper}_OPENAI_API_KEY")
+                or os.getenv("OPENAI_API_KEY")
+            )
+            if not openai_api_key:
+                logger.warning(f"Skipping {client_id}: missing OPENAI_API_KEY")
+                continue
+
+            google_calendar_creds_json = os.getenv(f"{client_id_upper}_GOOGLE_CALENDAR_CREDS", "{}")
+            google_calendar_creds = json.loads(google_calendar_creds_json)
+            
+            config = ClientConfig(
+                client_id=row["client_id"],
+                display_name=row.get("display_name", ""),
+                meta_phone_number_id=row["meta_phone_number_id"],
+                meta_verify_token=row["meta_verify_token"],
+                meta_whatsapp_token=meta_whatsapp_token,
+                human_agent_number=row["human_agent_number"],
+                google_calendar_id=row.get("google_calendar_id"),
+                google_calendar_creds=google_calendar_creds,
+                supabase_url=supabase_url,
+                supabase_service_key=supabase_service_key,
+                anthropic_api_key=anthropic_api_key,
+                openai_api_key=openai_api_key,
+                timezone=row.get("timezone", "Asia/Singapore"),
+                is_active=row["is_active"],
+                sheets_sync_enabled=row.get("sheets_sync_enabled", False),
+                sheets_spreadsheet_id=row.get("sheets_spreadsheet_id"),
+                sheets_service_account_creds=row.get("sheets_service_account_creds"),
+                widget_enabled=row.get("widget_enabled", False),
+                widget_primary_color=row.get("widget_primary_color", '#4F46E5'),
+                widget_agent_name=row.get("widget_agent_name", 'Assistant'),
+                widget_welcome_message=row.get("widget_welcome_message", 'Hi! How can I help you today?'),
+                widget_allowed_origins=row.get("widget_allowed_origins", ''),
+                widget_session_ttl_minutes=row.get("widget_session_ttl_minutes", 30),
+                widget_button_icon=row.get("widget_button_icon", "💬"),
+            )
+            configs.append(config)
+        except Exception as e:
+            logger.error(
+                f"Failed to construct ClientConfig for {row.get('client_id')}: {e}",
+                exc_info=True,
+            )
+            continue
+    
+    return configs

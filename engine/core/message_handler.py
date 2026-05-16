@@ -15,7 +15,7 @@ The webhook has already returned 200 to Meta before this function runs.
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from engine.config.client_config import load_client_config, ClientNotFoundError
 from engine.integrations.supabase_client import get_client_db
@@ -161,6 +161,144 @@ async def _get_active_followup_booking(db, phone_number: str) -> dict | None:
         return None
 
 
+async def _handle_takeover_inbound(
+    db,
+    client_config,
+    phone_number: str,
+    display_name: str,
+    message_text: str,
+) -> None:
+    """
+    Handle a message from a customer who is currently in takeover mode.
+    
+    Steps:
+    1. Forward the message to human_agent_number in real-time
+    2. Return (do NOT send AI reply, do NOT invoke agent)
+    """
+    logger.info(
+        f"Takeover gate ACTIVE for {phone_number} (client: {client_config.client_id}) — "
+        "forwarding to human agent, AI will not respond"
+    )
+    
+    # Format forward message
+    customer_name = display_name or phone_number
+    forward_text = (
+        f"📥 *{customer_name}* just replied:\n\n"
+        f'"{message_text}"\n\n'
+        f"(AI is paused. Reply \"done\" to resume AI.)"
+    )
+    
+    # Send forward to human agent
+    if client_config.human_agent_number:
+        try:
+            await send_message(
+                client_config=client_config,
+                to_phone_number=client_config.human_agent_number,
+                text=forward_text,
+            )
+            logger.info(
+                f"Takeover inbound forwarded to {client_config.human_agent_number} "
+                f"for customer {phone_number}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to forward takeover inbound for {phone_number}: {e}",
+                exc_info=True,
+            )
+            # Non-fatal — continue (human may see message in WhatsApp Business inbox)
+    
+    # Do NOT send any reply to the customer — complete silence
+    # Message is already logged to interactions_log (Step 2 in pipeline)
+
+
+async def _maybe_send_conversation_alert(
+    db,
+    client_config,
+    phone_number: str,
+    display_name: str,
+    message_text: str,
+) -> None:
+    """
+    Send a proactive conversation alert to human_agent_number if this is a new session.
+    
+    A "new session" = only one inbound message from this customer in the last 4 hours
+    (the current one just logged).
+    
+    Alert is sent ONCE per session (not per message) to prevent spam.
+    """
+    SESSION_TIMEOUT_HOURS = 4
+    
+    # Check last inbound message timestamp
+    # Count how many inbound messages in the session window
+    # If count > 1, session is already active (more than just the current message)
+    # If count == 1, it's a new session (only the current message is recent)
+    try:
+        cutoff_time = (datetime.now(timezone.utc) - timedelta(hours=SESSION_TIMEOUT_HOURS)).isoformat()
+        result = await (
+            db.table("interactions_log")
+            .select("timestamp", count="exact")
+            .eq("phone_number", phone_number)
+            .eq("direction", "inbound")
+            .gt("timestamp", cutoff_time)
+            .execute()
+        )
+        
+        count = result.count or len(result.data or [])
+        if count > 1:
+            # Session active (more than just the current message)
+            logger.debug(
+                f"Conversation session active for {phone_number} — skipping alert"
+            )
+            return
+    except Exception as e:
+        logger.error(
+            f"Failed to check conversation session for {phone_number}: {e}",
+            exc_info=True,
+        )
+        # On error, do NOT send alert (fail-safe — prefer no alert over spam)
+        return
+    
+    # New session detected — send alert
+    if not client_config.human_agent_number:
+        return  # No human agent configured, skip alert
+    
+    customer_name = display_name or phone_number
+    alert_text = (
+        f"📨 AI handling: *{customer_name}*\n\n"
+        f'"{message_text[:80]}{"..." if len(message_text) > 80 else ""}"\n\n'
+        f"Reply \"take\" to this message to take over."
+    )
+    
+    try:
+        alert_msg_id = await send_message(
+            client_config=client_config,
+            to_phone_number=client_config.human_agent_number,
+            text=alert_text,
+        )
+        
+        if alert_msg_id:
+            logger.info(
+                f"Conversation alert sent to {client_config.human_agent_number} "
+                f"for customer {phone_number}, wamid={alert_msg_id}"
+            )
+            
+            # Store alert wamid for reply-to-message detection
+            await db.table("customers").update({
+                "last_ai_alert_msg_id": alert_msg_id,
+            }).eq("phone_number", phone_number).execute()
+        else:
+            logger.warning(
+                f"Failed to send conversation alert for {phone_number} — "
+                "alert_msg_id is NULL"
+            )
+    except Exception as e:
+        logger.error(
+            f"Failed to send conversation alert for {phone_number}: {e}",
+            exc_info=True,
+        )
+        # Non-fatal — AI still handled the message successfully
+
+
 async def handle_inbound_message(
     client_id: str,
     phone_number: str,
@@ -268,6 +406,17 @@ async def handle_inbound_message(
             except Exception:
                 pass  # Even the fallback failed — log already captured above.
             return
+
+        # ── Step 3b: Takeover gate (runs BEFORE escalation gate) ──────────────
+        if customer_row and customer_row.get("takeover_flag") is True:
+            await _handle_takeover_inbound(
+                db=db,
+                client_config=client_config,
+                phone_number=phone_number,
+                display_name=display_name,
+                message_text=message_text,
+            )
+            return  # Stop pipeline — AI does NOT run
 
         # ── Step 4: Hard escalation gate (programmatic — never an agent decision) ──
         if customer_row and customer_row.get("escalation_flag") is True:
@@ -497,6 +646,16 @@ async def handle_inbound_message(
                     f"Failed to send/log agent reply to {phone_number}: {e}",
                     exc_info=True,
                 )
+
+        # ── Step 8: Send conversation alert (if new session) ──────────────────
+        # After the lock exits — fire-and-forget proactive alert to human_agent_number
+        await _maybe_send_conversation_alert(
+            db=db,
+            client_config=client_config,
+            phone_number=phone_number,
+            display_name=display_name,
+            message_text=message_text,
+        )
 
     except ClientNotFoundError:
         logger.error(
