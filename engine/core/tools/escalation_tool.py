@@ -113,17 +113,24 @@ async def escalate_to_human(
     alert_msg_id = None  # Will be populated if alert send succeeds
     if client_config.human_agent_number:
         try:
-            from engine.integrations.meta_whatsapp import send_message
+            from engine.integrations.meta_whatsapp import send_alert_to_human
 
             alert_text = _HUMAN_AGENT_ALERT_TEMPLATE.format(
                 client_name=client_config.display_name or client_config.client_id,
                 phone_number=phone_number,
                 reason=reason,
             )
-            alert_msg_id = await send_message(
+            alert_msg_id = await send_alert_to_human(
                 client_config=client_config,
                 to_phone_number=client_config.human_agent_number,
-                text=alert_text,
+                template_name=client_config.template_escalation_alert,
+                template_variables=[
+                    client_config.display_name or client_config.client_id,
+                    phone_number,
+                    reason,
+                ],
+                fallback_text=alert_text,
+                alert_label="escalation_alert",
             )
             if alert_msg_id:
                 logger.info(

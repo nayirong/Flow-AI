@@ -268,7 +268,16 @@ async def _handle_takeover_command(
         f"Reply \"done\" to this thread when finished."
     )
     try:
-        await send_message(client_config, phone_number, confirmation)
+        from engine.integrations.meta_whatsapp import send_alert_to_human
+        
+        await send_alert_to_human(
+            client_config=client_config,
+            to_phone_number=phone_number,
+            template_name=client_config.template_takeover_confirmation,
+            template_variables=[customer_name],
+            fallback_text=confirmation,
+            alert_label="takeover_confirmation",
+        )
     except Exception as e:
         logger.error(
             f"Failed to send takeover confirmation to {phone_number}: {e}",

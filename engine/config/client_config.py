@@ -63,6 +63,13 @@ class ClientConfig:
     business_start_time: str | None = None   # HH:MM:SS format
     business_end_time: str | None = None     # HH:MM:SS format
     # Note: timezone field already exists in dataclass (line 41)
+    
+    # WhatsApp template names (None = not configured, use free-text fallback)
+    template_escalation_alert: str | None = None
+    template_conversation_alert: str | None = None
+    template_takeover_forward: str | None = None
+    template_takeover_confirmation: str | None = None
+    template_auto_resume: str | None = None
 
 
 class ClientNotFoundError(Exception):
@@ -189,6 +196,12 @@ async def load_client_config(client_id: str) -> ClientConfig:
         business_start_time=row.get("business_start_time"),
         business_end_time=row.get("business_end_time"),
         # timezone already loaded above
+        # WhatsApp template names (migration 014 — safe to access, defaults to None)
+        template_escalation_alert=row.get("template_escalation_alert"),
+        template_conversation_alert=row.get("template_conversation_alert"),
+        template_takeover_forward=row.get("template_takeover_forward"),
+        template_takeover_confirmation=row.get("template_takeover_confirmation"),
+        template_auto_resume=row.get("template_auto_resume"),
     )
     
     # 5. Cache with TTL
@@ -299,6 +312,15 @@ async def get_all_active_clients() -> list[ClientConfig]:
                 widget_allowed_origins=row.get("widget_allowed_origins", ''),
                 widget_session_ttl_minutes=row.get("widget_session_ttl_minutes", 30),
                 widget_button_icon=row.get("widget_button_icon", "💬"),
+                ai_active_start_time=row.get("ai_active_start_time"),
+                ai_active_end_time=row.get("ai_active_end_time"),
+                business_start_time=row.get("business_start_time"),
+                business_end_time=row.get("business_end_time"),
+                template_escalation_alert=row.get("template_escalation_alert"),
+                template_conversation_alert=row.get("template_conversation_alert"),
+                template_takeover_forward=row.get("template_takeover_forward"),
+                template_takeover_confirmation=row.get("template_takeover_confirmation"),
+                template_auto_resume=row.get("template_auto_resume"),
             )
             configs.append(config)
         except Exception as e:

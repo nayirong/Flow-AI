@@ -332,10 +332,15 @@ async def _handle_takeover_inbound(
     # Send forward to human agent
     if client_config.human_agent_number:
         try:
-            await send_message(
+            from engine.integrations.meta_whatsapp import send_alert_to_human
+            
+            await send_alert_to_human(
                 client_config=client_config,
                 to_phone_number=client_config.human_agent_number,
-                text=forward_text,
+                template_name=client_config.template_takeover_forward,
+                template_variables=[customer_name, str(len(message_text))],
+                fallback_text=forward_text,
+                alert_label="takeover_forward",
             )
             logger.info(
                 f"Takeover inbound forwarded to {client_config.human_agent_number} "
@@ -404,17 +409,23 @@ async def _maybe_send_conversation_alert(
         return  # No human agent configured, skip alert
     
     customer_name = display_name or phone_number
+    truncated_message = message_text[:80] + ("..." if len(message_text) > 80 else "")
     alert_text = (
         f"📨 AI handling: *{customer_name}*\n\n"
-        f'"{message_text[:80]}{"..." if len(message_text) > 80 else ""}"\n\n'
+        f'"{truncated_message}"\n\n'
         f"Reply \"take\" to this message to take over."
     )
     
     try:
-        alert_msg_id = await send_message(
+        from engine.integrations.meta_whatsapp import send_alert_to_human
+        
+        alert_msg_id = await send_alert_to_human(
             client_config=client_config,
             to_phone_number=client_config.human_agent_number,
-            text=alert_text,
+            template_name=client_config.template_conversation_alert,
+            template_variables=[customer_name, truncated_message],
+            fallback_text=alert_text,
+            alert_label="conversation_alert",
         )
         
         if alert_msg_id:

@@ -111,7 +111,16 @@ async def _auto_resume_for_client(client_config, timeout_hours: int) -> None:
                     f"after {timeout_hours}-hour timeout."
                 )
                 try:
-                    await send_message(client_config, client_config.human_agent_number, notification)
+                    from engine.integrations.meta_whatsapp import send_alert_to_human
+                    
+                    await send_alert_to_human(
+                        client_config=client_config,
+                        to_phone_number=client_config.human_agent_number,
+                        template_name=client_config.template_auto_resume,
+                        template_variables=[customer_name, customer_phone],
+                        fallback_text=notification,
+                        alert_label="auto_resume",
+                    )
                 except Exception as e:
                     logger.error(
                         f"Failed to send auto-resume notification to {client_config.human_agent_number}: {e}",

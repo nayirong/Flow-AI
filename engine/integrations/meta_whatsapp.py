@@ -104,3 +104,115 @@ async def send_message(
             exc_info=True,
         )
         return None
+
+
+async def send_template_message(
+    client_config: ClientConfig,
+    to_phone_number: str,
+    template_name: str,
+    language_code: str,
+    components: list[dict],
+) -> Optional[str]:
+    """
+    Send a WhatsApp template message via Meta Cloud API.
+    Templates bypass the 24-hour session window restriction.
+    Returns wamid if sent successfully, None otherwise. Never raises.
+    """
+    url = (
+        f"https://graph.facebook.com/v19.0/"
+        f"{client_config.meta_phone_number_id}/messages"
+    )
+    headers = {
+        "Authorization": f"Bearer {client_config.meta_whatsapp_token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_phone_number,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": language_code},
+            "components": components,
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.post(url, headers=headers, json=payload)
+
+        if response.status_code == 200:
+            try:
+                response_data = response.json()
+                wamid = response_data["messages"][0]["id"]
+                logger.info(
+                    f"Template message '{template_name}' sent successfully to {to_phone_number}, wamid={wamid}"
+                )
+                return wamid
+            except (KeyError, IndexError, ValueError) as e:
+                logger.error(
+                    f"Failed to extract wamid from template response for {to_phone_number}: {e}, "
+                    f"body={response.text[:200]}"
+                )
+                return None
+
+        logger.error(
+            f"Meta API error sending template '{template_name}' to {to_phone_number}: "
+            f"status={response.status_code}, body={response.text[:200]}"
+        )
+        return None
+
+    except Exception as e:
+        logger.error(
+            f"Failed to send template '{template_name}' to {to_phone_number}: {e}",
+            exc_info=True,
+        )
+        return None
+
+
+async def send_alert_to_human(
+    client_config: ClientConfig,
+    to_phone_number: str,
+    template_name: Optional[str],
+    template_variables: list[str],
+    fallback_text: str,
+    alert_label: str,
+) -> Optional[str]:
+    """
+    Send an alert to the human agent, using a Meta template if configured,
+    falling back to free-text (which may be dropped by Meta outside 24h window).
+    Returns wamid or None. Never raises.
+    """
+    if template_name:
+        components = [
+            {
+                "type": "body",
+                "parameters": [
+                    {"type": "text", "text": str(v)} for v in template_variables
+                ],
+            }
+        ]
+        wamid = await send_template_message(
+            client_config=client_config,
+            to_phone_number=to_phone_number,
+            template_name=template_name,
+            language_code="en_US",
+            components=components,
+        )
+        if wamid is None:
+            logger.error(
+                f"Template send failed for '{alert_label}' → NOT falling back to free-text "
+                "(free-text would also be dropped outside 24h window)."
+            )
+        return wamid
+    else:
+        logger.warning(
+            f"Template '{alert_label}' not configured for client "
+            f"{client_config.client_id} — falling back to free-text "
+            "(may be dropped by Meta outside 24h window)"
+        )
+        return await send_message(
+            client_config=client_config,
+            to_phone_number=to_phone_number,
+            text=fallback_text,
+        )
