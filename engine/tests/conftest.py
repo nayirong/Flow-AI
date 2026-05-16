@@ -59,6 +59,7 @@ def mock_supabase_client(mock_supabase_clients_row):
     chain = MagicMock()
     chain.select.return_value = chain
     chain.eq.return_value = chain
+    chain.in_.return_value = chain
     chain.limit.return_value = chain
     chain.order.return_value = chain
     chain.execute = mock_execute

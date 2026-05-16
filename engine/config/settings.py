@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Set to 1 in Railway for testing; leave at 60 for production.
     scheduler_interval_minutes: int = 60
 
+    # Takeover auto-resume timeout (hours)
+    takeover_timeout_hours: int = 4
+
     # Logging
     log_level: str = "INFO"
     

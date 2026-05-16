@@ -33,8 +33,12 @@ async def lifespan(app: FastAPI):
     
     Starts the follow-up scheduler on startup, shuts it down on shutdown.
     """
+    from engine.core.takeover_auto_resume import run_takeover_auto_resume
+    
     scheduler = AsyncIOScheduler()
     interval_minutes = get_settings().scheduler_interval_minutes
+    
+    # Job 1: Follow-up scheduler (existing)
     scheduler.add_job(
         run_followup_scheduler,
         trigger="interval",
@@ -42,11 +46,23 @@ async def lifespan(app: FastAPI):
         id="followup_scheduler",
         replace_existing=True,
     )
+    
+    # Job 2: Takeover auto-resume (new)
+    scheduler.add_job(
+        run_takeover_auto_resume,
+        trigger="interval",
+        minutes=30,  # Run every 30 minutes
+        id="takeover_auto_resume",
+        replace_existing=True,
+    )
+    
     scheduler.start()
-    logger.info(f"Follow-up scheduler started (interval: {interval_minutes} min)")
+    logger.info(
+        f"Scheduler started: followup={interval_minutes}min, takeover_auto_resume=30min"
+    )
     yield
     scheduler.shutdown(wait=False)
-    logger.info("Follow-up scheduler stopped")
+    logger.info("Scheduler stopped")
 
 
 app = FastAPI(lifespan=lifespan)
