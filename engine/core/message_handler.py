@@ -392,8 +392,8 @@ async def _maybe_send_conversation_alert(
         count = result.count or len(result.data or [])
         if count > 1:
             # Session active (more than just the current message)
-            logger.debug(
-                f"Conversation session active for {phone_number} — skipping alert"
+            logger.info(
+                f"Conversation session active for {phone_number} (count={count}) — skipping alert"
             )
             return
     except Exception as e:
