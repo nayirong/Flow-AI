@@ -66,6 +66,37 @@ _BOOKING_CONFIRMATION_KEYWORDS = [
 ]
 
 
+# Guardrail: detect when agent implies human follow-up without calling escalate_to_human.
+# These phrases appear when the agent bypasses the tool and tells the customer directly
+# that "the team will reach out" — without triggering the actual escalation.
+_ESCALATION_BYPASS_KEYWORDS = [
+    "our team will reach out",
+    "our team will be in touch",
+    "team will be in touch",
+    "they'll be in touch",
+    "they will be in touch",
+    "team will contact",
+    "will follow up with you",
+    "will get back to you",
+    "will reach out to you",
+    "our team will contact",
+    "a member of our team",
+    "our specialists will",
+    "human team will",
+    "team will assist",
+    "someone will reach out",
+    "someone from our team",
+    "pricing options with you",
+    "team can discuss",
+]
+
+
+def _contains_escalation_bypass(text: str) -> bool:
+    """Return True if text implies human follow-up without the escalate_to_human tool being called."""
+    lower = text.lower()
+    return any(phrase in lower for phrase in _ESCALATION_BYPASS_KEYWORDS)
+
+
 def _contains_booking_confirmation(text: str) -> bool:
     """Return True if text contains booking confirmation language."""
     lower = text.lower()
@@ -397,6 +428,10 @@ async def run_agent(
     confirm_booking_succeeded = False
     _confirm_reprompt_used = False
 
+    # Third guardrail: escalation bypass detection.
+    # Fires when agent implies human follow-up in text without calling escalate_to_human.
+    _escalation_reprompt_used = False
+
     # Build initial messages list: history + current inbound
     messages: list[dict] = list(conversation_history) + [
         {"role": "user", "content": current_message}
@@ -524,6 +559,7 @@ async def run_agent(
                 f"Agent response generated (iter={iteration + 1}, "
                 f"chars={len(final_text)})"
             )
+            logger.debug("Agent response text (iter=%d): %s", iteration + 1, final_text)
 
             # Second guardrail: pending booking exists but confirm_booking not called.
             # Catches the case where the agent fabricates a booking confirmation in
@@ -648,6 +684,55 @@ async def run_agent(
                     return _BOOKING_GUARDRAIL_FALLBACK
 
                 # _GuardrailAction.PASS_THROUGH — fall through to return below
+
+            # ── Escalation bypass guardrail ───────────────────────────────────
+            # Fires when agent says "team will reach out" (or similar) without
+            # calling escalate_to_human. One re-prompt; then programmatic escalation.
+            if not escalation_called and _contains_escalation_bypass(final_text):
+                if not _escalation_reprompt_used:
+                    _escalation_reprompt_used = True
+                    logger.warning(
+                        "ESCALATION GUARDRAIL: agent implied human follow-up without calling "
+                        "escalate_to_human (iter=%d, chars=%d, client_id=%s) — re-prompt injected",
+                        iteration + 1, len(final_text), client_id,
+                    )
+                    await log_incident(
+                        provider="agent_guardrail",
+                        error_type="escalation_bypass_reprompt",
+                        error_message=f"agent bypassed escalate_to_human (iter={iteration + 1})",
+                        client_id=client_id,
+                    )
+                    messages.append({"role": "assistant", "content": [{"type": "text", "text": final_text}]})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[SYSTEM CORRECTION] You must call escalate_to_human FIRST before sending "
+                            "any message implying the team will follow up. You cannot tell the customer "
+                            "our team will reach out without first calling the escalate_to_human tool. "
+                            "Call escalate_to_human now with a clear reason, then send your customer-facing message."
+                        ),
+                    })
+                    continue
+                else:
+                    # Re-prompt failed — programmatically escalate
+                    logger.warning(
+                        "ESCALATION GUARDRAIL FIRED: agent bypassed escalate_to_human after re-prompt "
+                        "(client_id=%s) — escalating programmatically",
+                        client_id,
+                    )
+                    await log_incident(
+                        provider="agent_guardrail",
+                        error_type="escalation_bypass_guardrail_fired",
+                        error_message=f"agent bypassed escalate_to_human after re-prompt (iter={iteration + 1})",
+                        client_id=client_id,
+                    )
+                    try:
+                        await tool_dispatch["escalate_to_human"](
+                            reason="Escalation guardrail fired — agent could not be directed to call tool"
+                        )
+                    except Exception as esc_err:
+                        logger.error("Failed to escalate programmatically after guardrail: %s", esc_err)
+                    return final_text  # Return whatever the agent said — escalation is now set
 
             os.environ["LLM_PROVIDER"] = _original_llm_provider
             return final_text or _FALLBACK_RESPONSE
