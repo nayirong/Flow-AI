@@ -184,6 +184,10 @@ async def send_alert_to_human(
     Returns wamid or None. Never raises.
     """
     if template_name:
+        logger.info(
+            f"Sending alert '{alert_label}' via template '{template_name}' "
+            f"to {to_phone_number} | vars={template_variables}"
+        )
         components = [
             {
                 "type": "body",
